@@ -1,0 +1,13 @@
+# secrets
+.env
+*.token
+src/config/secrets.*
+
+# python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# spark
+*.crc
+_SUCCESS
