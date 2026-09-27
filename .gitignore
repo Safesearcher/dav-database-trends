@@ -11,3 +11,4 @@ __pycache__/
 # spark
 *.crc
 _SUCCESS
+github_api.txt
