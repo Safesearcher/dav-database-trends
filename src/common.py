@@ -67,6 +67,14 @@ DATE_COLUMN_MAP = {
     "repo_metadata": "updated_at",
 }
 
+EMAIL_REGEX = r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"
+
+
+def scrub_emails(col):
+    """Masks email addresses in a string Column or string expression with [EMAIL]."""
+    target_col = F.col(col) if isinstance(col, str) else col
+    return F.regexp_replace(target_col, EMAIL_REGEX, "[EMAIL]")
+
 
 # -----------------------------------------------------------------------------
 # 1. Parameter Widget Parser
@@ -499,7 +507,7 @@ def sanitize_commit_message(message_col: str):
     """Extracts the first line of a commit message, scrubs trailers, and masks e-mail addresses."""
     target_col = F.col(message_col) if isinstance(message_col, str) else message_col
     first_line = F.split(target_col, r"\r?\n").getItem(0)
-    clean_line = F.trim(F.regexp_replace(first_line, r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[EMAIL]"))
+    clean_line = F.trim(scrub_emails(first_line))
     sanitized = F.when(
         clean_line.rlike(r"(?i)^(signed-off-by|co-authored-by):"),
         F.lit("[TRUNCATED_TRAILER]")

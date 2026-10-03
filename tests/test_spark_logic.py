@@ -43,6 +43,8 @@ try:
         SparkSession.builder
         .master("local[1]")
         .appName("test_spark_logic")
+        .config("spark.driver.host", "127.0.0.1")
+        .config("spark.driver.bindAddress", "127.0.0.1")
         .config("spark.sql.ansi.enabled", "true")
         .config("spark.sql.session.timeZone", "UTC")
         .getOrCreate()
@@ -151,15 +153,18 @@ class TestSparkLogic(unittest.TestCase):
             (None,),
         ]
         df = spark.createDataFrame(data, ["dt_str"])
-        res = df.select(parse_iso_timestamp("dt_str").alias("parsed")).collect()
+        res = df.select(
+            parse_iso_timestamp("dt_str").alias("parsed"),
+            F.date_format(parse_iso_timestamp("dt_str"), "yyyy-MM-dd HH:mm:ss").alias("formatted")
+        ).collect()
 
         # First 3 must parse to the exact UTC timestamp 2026-01-01 00:00:00
         self.assertIsNotNone(res[0]["parsed"])
-        self.assertEqual(res[0]["parsed"].strftime("%Y-%m-%d %H:%M:%S"), "2026-01-01 00:00:00")
+        self.assertEqual(res[0]["formatted"], "2026-01-01 00:00:00")
         self.assertIsNotNone(res[1]["parsed"])
-        self.assertEqual(res[1]["parsed"].strftime("%Y-%m-%d %H:%M:%S"), "2026-01-01 00:00:00")
+        self.assertEqual(res[1]["formatted"], "2026-01-01 00:00:00")
         self.assertIsNotNone(res[2]["parsed"])
-        self.assertEqual(res[2]["parsed"].strftime("%Y-%m-%d %H:%M:%S"), "2026-01-01 00:00:00")
+        self.assertEqual(res[2]["formatted"], "2026-01-01 00:00:00")
 
         # Invalid or empty dates must return NULL without raising exceptions
         self.assertIsNone(res[3]["parsed"])
@@ -213,6 +218,35 @@ class TestSparkLogic(unittest.TestCase):
         self.assertEqual(counts["total"], 5)
         self.assertEqual(counts["corrupt"], 3)
         self.assertEqual(counts["valid"], 2)
+
+    # -------------------------------------------------------------------------
+    # BUG 1 Tests: Email scrubbing in commit headlines, issue titles, and PR titles
+    # -------------------------------------------------------------------------
+    @unittest.skipIf(not HAS_SPARK, "Spark JVM runtime not available in local environment")
+    def test_email_scrubbing_commit_headlines_and_titles(self):
+        from src.common import sanitize_commit_message, scrub_emails
+
+        # 1. Headline cases
+        test_cases = [
+            ("Fix thing, thanks bob@example.com\n\nbody", "Fix thing, thanks [EMAIL]"),
+            ("Merge: alice.smith+x@corp.co.uk fixed", "Merge: [EMAIL] fixed"),
+            ("Two emails: first@a.com and second@b.co.uk here", "Two emails: [EMAIL] and [EMAIL] here"),
+            ("Signed-off-by: A <a@x.com>", "[TRUNCATED_TRAILER]"),
+            ("Clean commit with no email address", "Clean commit with no email address"),
+        ]
+        df = spark.createDataFrame([(msg,) for msg, _ in test_cases], ["msg"])
+        results = [r["h"] for r in df.select(sanitize_commit_message("msg").alias("h")).collect()]
+        for (_, expected), actual in zip(test_cases, results):
+            self.assertEqual(actual, expected)
+
+        # 2. Issue/PR title masking
+        title_df = spark.createDataFrame(
+            [("Issue reported by reporter@example.org on v1.2",), ("Clean title",)],
+            ["title"]
+        )
+        res = [r["t"] for r in title_df.select(scrub_emails("title").alias("t")).collect()]
+        self.assertEqual(res[0], "Issue reported by [EMAIL] on v1.2")
+        self.assertEqual(res[1], "Clean title")
 
 
 if __name__ == "__main__":
