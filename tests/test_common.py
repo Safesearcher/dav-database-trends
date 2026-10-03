@@ -9,6 +9,7 @@ Unit tests for src/common.py reusable pipeline functions:
 
 import os
 import unittest
+from unittest import mock
 from datetime import datetime, timezone
 
 from src.common import (
@@ -84,9 +85,14 @@ class TestCommonFunctions(unittest.TestCase):
         self.assertEqual(params["entity"], "issues")
 
     def test_get_salt_fallback(self):
-        salt = get_salt(dbutils=None)
-        self.assertIsInstance(salt, str)
-        self.assertGreater(len(salt), 0)
+        with mock.patch.dict(os.environ, {"SALT": "test_salt_123"}):
+            salt = get_salt(dbutils=None)
+            self.assertEqual(salt, "test_salt_123")
+
+    def test_get_salt_no_salt_raises(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(ValueError):
+                get_salt(dbutils=None)
 
     def test_known_bot_accounts_list(self):
         self.assertIn("bors", KNOWN_BOT_ACCOUNTS)

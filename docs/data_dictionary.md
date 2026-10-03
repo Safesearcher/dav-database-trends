@@ -26,14 +26,14 @@ Represents development velocity, code churn, and contributor engagement across r
 | :--- | :--- | :---: | :---: | :--- |
 | `repo_full_name` | `STRING` | No | PK (Composite) | GitHub repository identifier (e.g. `surrealdb/surrealdb`). |
 | `commit_sha` | `STRING` | No | PK (Composite) | Unique 40-character Git commit hash. |
-| `author_login` | `STRING` | Yes | No | Contributor GitHub username; falls back to committer login if null. |
+| `author_login` | `STRING` | Yes | No | Contributor GitHub username; null if the commit author has no linked GitHub account. |
 | `author_id` | `BIGINT` | Yes | No | Contributor GitHub account ID. |
 | `author_email_hash` | `STRING` | Yes | No | Salted SHA-256 hash: `sha256(lowercase(author.email) + salt)`. |
 | `committer_email_hash` | `STRING` | Yes | No | Salted SHA-256 hash: `sha256(lowercase(committer.email) + salt)`. |
 | `commit_date_utc` | `TIMESTAMP` | Yes | No | UTC timestamp parsed from commit author date. |
 | `commit_headline` | `STRING` | Yes | No | First line of commit message; Signed-off-by trailers stripped. |
 | `comment_count` | `INT` | Yes | No | Number of commit discussion comments on GitHub. |
-| `is_bot` | `BOOLEAN` | No | No | True if user type is Bot, login contains `[bot]`, or matches known CI accounts. |
+| `is_bot` | `BOOLEAN` | No | No | True if user type is Bot, login contains `[bot]`, matches known CI accounts, or ends with `(-|_)bot` or `bot`. |
 | `_source_file` | `STRING` | Yes | No | Lineage path to raw Bronze source in Unity Catalog Volume. |
 | `load_timestamp` | `TIMESTAMP` | No | No | UTC timestamp when record was merged into Silver. |
 

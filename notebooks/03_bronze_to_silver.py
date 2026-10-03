@@ -26,6 +26,7 @@ dbutils.widgets.text("salt", "", "PII Salt (Optional fallback)")
 # COMMAND ----------
 import sys
 import os
+import json
 from datetime import datetime, timezone
 from pyspark.sql import functions as F
 from pyspark.sql.types import (
@@ -54,6 +55,7 @@ from src.common import (
     log_run,
     merge_delta,
     quarantine_records,
+    DATE_COLUMN_MAP,
 )
 
 # Parse parameters
@@ -100,8 +102,8 @@ def transform_commits(bronze_df, repo_full_name, salt):
     transformed = bronze_df.select(
         F.lit(repo_full_name).alias("repo_full_name"),
         F.col("sha").alias("commit_sha"),
-        F.coalesce(F.col("author.login"), F.col("committer.login")).alias("author_login"),
-        F.coalesce(F.col("author.id"), F.col("committer.id")).cast(LongType()).alias("author_id"),
+        F.col("author.login").alias("author_login"),
+        F.col("author.id").cast(LongType()).alias("author_id"),
         hash_email("commit.author.email", salt).alias("author_email_hash"),
         hash_email("commit.committer.email", salt).alias("committer_email_hash"),
         parsed_date.alias("commit_date_utc"),
@@ -342,6 +344,14 @@ def run_silver_entity(
             (F.col("repo_full_name") == repo_slug)
         )
 
+        date_col = DATE_COLUMN_MAP.get(entity)
+        if run_mode in ("incremental", "backfill") and date_col:
+            date_expr = parse_iso_timestamp(date_col)
+            if since_str:
+                bronze_raw = bronze_raw.filter(date_expr >= F.to_timestamp(F.lit(since_str)))
+            if until_str:
+                bronze_raw = bronze_raw.filter(date_expr <= F.to_timestamp(F.lit(until_str)))
+
         bronze_count = bronze_raw.count()
         if bronze_count == 0:
             print(f"  [Empty] 0 records found in {bronze_table} for {repo_full_name}.")
@@ -352,26 +362,14 @@ def run_silver_entity(
         # Execute entity-specific transformation
         if entity == "commits":
             valid_df, rejected_df, pk_keys = transform_commits(bronze_raw, repo_full_name, salt)
-            date_col = "commit_date_utc"
         elif entity == "issues":
             valid_df, rejected_df, pk_keys, excluded_prs = transform_issues(bronze_raw, repo_full_name)
-            date_col = "created_at_utc"
         elif entity == "pulls":
             valid_df, rejected_df, pk_keys = transform_pull_requests(bronze_raw, repo_full_name)
-            date_col = "created_at_utc"
         elif entity == "releases":
             valid_df, rejected_df, pk_keys = transform_releases(bronze_raw, repo_full_name)
-            date_col = "published_at_utc"
         elif entity == "repo_metadata":
             valid_df, rejected_df, pk_keys = transform_metadata(bronze_raw, repo_full_name)
-            date_col = "created_at_utc"
-
-        # Apply time filtering for incremental / backfill runs
-        if run_mode in ("incremental", "backfill") and date_col:
-            if since_str:
-                valid_df = valid_df.filter(F.col(date_col) >= F.to_timestamp(F.lit(since_str)))
-            if until_str:
-                valid_df = valid_df.filter(F.col(date_col) <= F.to_timestamp(F.lit(until_str)))
 
         # Route invalid / malformed records to ops.silver_quarantine
         quarantined_count = 0
@@ -455,8 +453,7 @@ for r_name in repos_to_process:
                 "quarantined_rows": metrics["quarantined"],
                 "excluded_prs": metrics["excluded_prs"],
                 "reconciled": (
-                    metrics["bronze_count"] == (metrics["silver_inserted"] + metrics["quarantined"] + metrics["excluded_prs"])
-                    if run_mode == "full" and metrics["silver_updated"] == 0 else True
+                    metrics["bronze_count"] == (metrics["silver_inserted"] + metrics["silver_updated"] + metrics["quarantined"] + metrics["excluded_prs"])
                 )
             })
         except Exception as err:
@@ -470,6 +467,7 @@ for r_name in repos_to_process:
                 "quarantined_rows": 0,
                 "excluded_prs": 0,
                 "reconciled": False,
+                "error": str(err),
             })
 
 # COMMAND ----------
@@ -496,3 +494,16 @@ for rec in reconciliation_records:
     )
 
 print("=" * 105)
+
+failed_entities = [r for r in reconciliation_records if "error" in r]
+if failed_entities:
+    raise RuntimeError(f"{len(failed_entities)} entity run(s) failed: {failed_entities}")
+
+summary = {
+    "batch_id": batch_id,
+    "records": reconciliation_records,
+}
+try:
+    dbutils.notebook.exit(json.dumps(summary))
+except Exception:
+    pass
