@@ -17,8 +17,8 @@
 # COMMAND ----------
 dbutils.widgets.text("catalog", "workspace", "Unity Catalog Name")
 dbutils.widgets.text("repo", "surrealdb/surrealdb", "Repository Name ('owner/repo' or 'ALL')")
-dbutils.widgets.text("since", "2026-04-01T00:00:00Z", "Since Filter Timestamp")
-dbutils.widgets.text("until", "2026-10-01T00:00:00Z", "Until Filter Timestamp")
+dbutils.widgets.text("since", "", "Since Filter Timestamp (empty = no lower bound)")
+dbutils.widgets.text("until", "", "Until Filter Timestamp (empty = no upper bound)")
 dbutils.widgets.text("batch_id", "", "Batch Run ID (Empty for auto-generated)")
 dbutils.widgets.dropdown("run_mode", "full", ["full", "incremental", "backfill"], "Execution Run Mode")
 dbutils.widgets.text("salt", "", "PII Salt (Optional fallback)")

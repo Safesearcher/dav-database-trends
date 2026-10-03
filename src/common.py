@@ -96,24 +96,23 @@ def get_params(dbutils=None) -> dict:
 
     params = {}
     for key, default_val in defaults.items():
-        val = None
         try:
-            val = dbutils.widgets.get(key)
+            val = dbutils.widgets.get(key)            # widget already defined by the notebook -> never re-declare
         except Exception:
             try:
                 if key == "run_mode":
-                    dbutils.widgets.dropdown(key, default_val, ["full", "incremental", "backfill"], "Execution Run Mode")
+                    dbutils.widgets.dropdown(key, default_val, ["full", "incremental", "backfill"], key)
                 else:
-                    dbutils.widgets.text(key, str(default_val), f"Parameter: {key}")
+                    dbutils.widgets.text(key, str(default_val), key)
                 val = dbutils.widgets.get(key)
             except Exception:
                 val = None
         if val is None:
             params[key] = default_val
         elif key in EMPTY_ALLOWED:
-            params[key] = str(val).strip()
+            params[key] = val.strip()                 # keep "" as ""
         else:
-            params[key] = str(val).strip() or default_val
+            params[key] = val.strip() or default_val  # blank catalog/repo/batch_id -> default
 
     if params["run_mode"].lower() not in VALID_RUN_MODES:
         params["run_mode"] = "full"
@@ -467,18 +466,13 @@ def sanitize_commit_message(message_col: str):
     return sanitized
 
 
-def parse_iso_timestamp(col_name: str):
-    """Safely converts ISO-8601 string timestamp to a PySpark TimestampType."""
-    if col_name is None:
-        return F.lit(None).cast(TimestampType())
+_ISO_FORMATS = ["yyyy-MM-dd'T'HH:mm:ssXXX", "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"]
 
-    target_col = F.col(col_name) if isinstance(col_name, str) else col_name
-    empty_or_null = target_col.isNull() | (F.trim(F.col(col_name) if isinstance(col_name, str) else target_col.cast("string")) == "")
-    candidates = [
-        F.to_timestamp(target_col, "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"),
-        F.to_timestamp(target_col, "yyyy-MM-dd'T'HH:mm:ssXXX"),
-        F.to_timestamp(target_col, "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"),
-        F.to_timestamp(target_col, "yyyy-MM-dd'T'HH:mm:ss'Z'"),
-        F.to_timestamp(target_col),
-    ]
-    return F.when(empty_or_null, F.lit(None).cast(TimestampType())).otherwise(F.coalesce(*candidates))
+def parse_iso_timestamp(col_name: str):
+    """ANSI-safe: never raises, returns NULL for unparseable input.
+    col_name is a SQL column reference string; dotted nested paths are fine."""
+    if not isinstance(col_name, str):
+        raise TypeError("parse_iso_timestamp expects a column-name string")
+    exprs = [F.expr(f'try_to_timestamp({col_name}, "{fmt}")') for fmt in _ISO_FORMATS]
+    exprs.append(F.expr(f"try_to_timestamp({col_name})"))
+    return F.coalesce(*exprs)
