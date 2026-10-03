@@ -150,7 +150,7 @@ def process_entity(
             return {"status": "SUCCESS", "inserted": 0, "updated": 0, "drift": []}
 
         # 2. Discover Schema Drift before reading
-        drifted_keys = discover_drift_keys(raw_df, explicit_schema)
+        drifted_keys = discover_drift_keys(raw_df, explicit_schema, run_ctx=run_ctx)
         if drifted_keys:
             print(f"  [Schema Drift] Detected {len(drifted_keys)} unmapped fields in raw JSON: {drifted_keys}")
             run_ctx["parameter"] = f"{param_desc},drift_keys={','.join(drifted_keys)}"

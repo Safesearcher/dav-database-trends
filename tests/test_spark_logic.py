@@ -431,6 +431,56 @@ class TestSparkLogic(unittest.TestCase):
         id_2 = q_b2.first()["quarantine_id"]
         self.assertNotEqual(id_1, id_2)
 
+    # -------------------------------------------------------------------------
+    # BUG 6 Tests: discover_drift_keys sanitization, collision checks, and capping
+    # -------------------------------------------------------------------------
+    @unittest.skipIf(not HAS_SPARK, "Spark JVM runtime not available in local environment")
+    def test_discover_drift_keys_sanitization_and_capping(self):
+        import json
+        from pyspark.sql.types import StructType, StructField, StringType
+        from src.common import discover_drift_keys
+
+        schema = StructType([
+            StructField("existing_col", StringType(), True),
+            StructField("_corrupt_record", StringType(), True),
+        ])
+
+        # 1. 'valid_col_name' accepted; invalid characters and collisions rejected
+        test_payload = {
+            "valid_col_name": 1,
+            "another_valid_2": 2,
+            "invalid col name": 3,
+            "col-with-dash": 4,
+            "col.with.dot": 5,
+            "1starts_with_num": 6,
+            "col;drop table": 7,
+            "repo_full_name": 8,  # Reserved collision
+            "_source_file": 9,    # Reserved collision
+            "existing_col": 10,   # Already in schema
+        }
+        df = spark.createDataFrame([(json.dumps(test_payload),)], ["_raw_record"])
+        run_ctx = {}
+        keys = discover_drift_keys(df, schema, run_ctx=run_ctx)
+
+        self.assertIn("valid_col_name", keys)
+        self.assertIn("another_valid_2", keys)
+        self.assertNotIn("invalid col name", keys)
+        self.assertNotIn("col-with-dash", keys)
+        self.assertNotIn("col.with.dot", keys)
+        self.assertNotIn("1starts_with_num", keys)
+        self.assertNotIn("col;drop table", keys)
+        self.assertNotIn("repo_full_name", keys)
+        self.assertNotIn("_source_file", keys)
+        self.assertNotIn("existing_col", keys)
+        self.assertIn("SKIPPED_DRIFT_KEYS", run_ctx.get("message", ""))
+
+        # 2. Capping at 25 keys if 30 valid keys exist
+        many_keys_payload = {f"new_valid_col_{i:02d}": i for i in range(30)}
+        df_many = spark.createDataFrame([(json.dumps(many_keys_payload),)], ["_raw_record"])
+        keys_capped = discover_drift_keys(df_many, StructType([]), max_keys=25)
+        self.assertEqual(len(keys_capped), 25)
+        self.assertEqual(keys_capped, sorted(keys_capped))
+
 
 if __name__ == "__main__":
     unittest.main()

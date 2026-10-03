@@ -328,11 +328,58 @@ def parse_records(raw_df, schema, extra_string_cols=()):
     return parsed.select("_raw_record", "p.*")
 
 
-def discover_drift_keys(raw_df, schema) -> list:
-    """Top-level keys present in ANY record but absent from the explicit schema."""
-    expected = {f.name for f in schema.fields if f.name != "_corrupt_record"}
-    keys = raw_df.select(F.explode(F.expr("json_object_keys(_raw_record)")).alias("k")).distinct()
-    return sorted(r["k"] for r in keys.collect() if r["k"] not in expected)
+SAFE_IDENTIFIER_REGEX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+RESERVED_DRIFT_COLUMNS = {
+    "repo_full_name",
+    "_source_file",
+    "batch_id",
+    "load_timestamp",
+    "_raw_record",
+    "_corrupt_record",
+}
+MAX_DRIFT_COLUMNS_PER_BATCH = 25
+
+
+def discover_drift_keys(raw_df, schema, max_keys: int = MAX_DRIFT_COLUMNS_PER_BATCH, run_ctx: dict = None) -> list:
+    """Top-level keys present in ANY record but absent from the explicit schema.
+
+    Enforces:
+    1. Only valid SQL column names: regex ^[A-Za-z_][A-Za-z0-9_]*$.
+    2. Rejects collisions with schema fields and reserved pipeline metadata columns.
+    3. Caps the maximum number of new drift columns per batch (default 25).
+    4. Logs warnings in run_ctx['message'] if keys are skipped.
+    """
+    expected = {f.name.lower() for f in schema.fields} | {c.lower() for c in RESERVED_DRIFT_COLUMNS}
+    raw_keys_df = raw_df.select(F.explode(F.expr("json_object_keys(_raw_record)")).alias("k")).distinct()
+    all_raw_keys = sorted(r["k"] for r in raw_keys_df.collect())
+
+    valid_keys = []
+    skipped_invalid = []
+    skipped_reserved = []
+
+    for k in all_raw_keys:
+        if k.lower() in expected:
+            if k.lower() in {c.lower() for c in RESERVED_DRIFT_COLUMNS} and k.lower() not in {f.name.lower() for f in schema.fields}:
+                skipped_reserved.append(k)
+            continue
+        if not SAFE_IDENTIFIER_REGEX.match(k):
+            skipped_invalid.append(k)
+            continue
+        valid_keys.append(k)
+
+    capped_keys = valid_keys[:max_keys]
+    skipped_capped = valid_keys[max_keys:]
+
+    skipped_total = skipped_invalid + skipped_reserved + skipped_capped
+    if skipped_total:
+        warning_msg = f"Skipped drift keys: invalid={skipped_invalid}, reserved={skipped_reserved}, capped={skipped_capped}"
+        print(f"  [Warning] {warning_msg}")
+        if run_ctx is not None:
+            prev_msg = run_ctx.get("message")
+            note = f"SKIPPED_DRIFT_KEYS: {skipped_total}"
+            run_ctx["message"] = f"{prev_msg}; {note}" if prev_msg else note
+
+    return capped_keys
 
 
 def evolve_table_schema(spark, target_table: str, new_cols) -> list:
@@ -341,7 +388,10 @@ def evolve_table_schema(spark, target_table: str, new_cols) -> list:
     existing = {c.lower() for c in spark.table(target_table).columns}
     added = []
     for c in new_cols:
-        if c.lower() not in existing:
+        if not SAFE_IDENTIFIER_REGEX.match(c):
+            print(f"  [Warning] evolve_table_schema skipping unsafe column name: '{c}'")
+            continue
+        if c.lower() not in existing and c.lower() not in {r.lower() for r in RESERVED_DRIFT_COLUMNS}:
             spark.sql(f"ALTER TABLE {target_table} ADD COLUMNS (`{c}` STRING)")
             added.append(c)
     return added
