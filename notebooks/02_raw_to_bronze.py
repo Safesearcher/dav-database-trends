@@ -188,7 +188,7 @@ def process_entity(
             F.lit(f"Null primary key ({pk_field})")
         )
         rejected_df = enriched_df.filter(rejected_cond).withColumn("rejection_reason", rejection_expr)
-        valid_df = enriched_df.filter(~rejected_cond).drop("_corrupt_record", "_raw_record")
+        valid_df = enriched_df.filter(~rejected_cond).drop("_corrupt_record")
 
         if rejected_n > 0:
             q_count = quarantine_records(
@@ -220,23 +220,29 @@ def process_entity(
             if until_str:
                 valid_df = valid_df.filter(date_expr <= F.to_timestamp(F.lit(until_str)))
 
-        # 7. Deduplicate incoming batch on primary key, keeping latest date
+        # 7. Deduplicate incoming batch on primary key, keeping latest date, tie-breaking on sha2(_raw_record)
         if date_col:
             dedup_window = (
                 Window.partitionBy("repo_full_name", pk_field)
-                .orderBy(F.coalesce(parse_iso_timestamp(date_col), F.to_timestamp(F.lit("1970-01-01"))).desc(), F.col("_source_file").asc())
+                .orderBy(
+                    F.coalesce(parse_iso_timestamp(date_col), F.to_timestamp(F.lit("1970-01-01"))).desc(),
+                    F.sha2(F.col("_raw_record"), 256).asc(),
+                )
             )
         else:
             dedup_window = (
                 Window.partitionBy("repo_full_name", pk_field)
-                .orderBy(F.col("load_timestamp").desc(), F.col("_source_file").asc())
+                .orderBy(
+                    F.col("load_timestamp").desc(),
+                    F.sha2(F.col("_raw_record"), 256).asc(),
+                )
             )
 
         deduped_df = (
             valid_df
             .withColumn("_row_num", F.row_number().over(dedup_window))
             .filter(F.col("_row_num") == 1)
-            .drop("_row_num")
+            .drop("_row_num", "_raw_record")
         )
 
         # 8. Evolve table schema and MERGE INTO bronze.<entity>

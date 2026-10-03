@@ -313,6 +313,56 @@ class TestSparkLogic(unittest.TestCase):
         self.assertEqual(cols_same, [])
         self.assertEqual(aligned_same.columns, ["col_a", "col_b", "col_c"])
 
+    # -------------------------------------------------------------------------
+    # BUG 4 Tests: Deterministic dedup tie-breaker
+    # -------------------------------------------------------------------------
+    @unittest.skipIf(not HAS_SPARK, "Spark JVM runtime not available in local environment")
+    def test_deterministic_dedup_tie_breaker(self):
+        from pyspark.sql.window import Window
+        from src.common import parse_iso_timestamp
+
+        raw_a = '{"id": 42, "updated_at": "2026-01-01T00:00:00Z", "body": "Record Alpha"}'
+        raw_b = '{"id": 42, "updated_at": "2026-01-01T00:00:00Z", "body": "Record Beta"}'
+
+        # Compute which raw record has the lower sha256 hash
+        import hashlib
+        hash_a = hashlib.sha256(raw_a.encode("utf-8")).hexdigest()
+        hash_b = hashlib.sha256(raw_b.encode("utf-8")).hexdigest()
+        expected_winner_body = "Record Alpha" if hash_a < hash_b else "Record Beta"
+
+        date_col = "updated_at"
+        pk_field = "id"
+
+        for iteration in range(10):
+            # Alternate order of input rows across iterations
+            rows = (
+                [("repo/test", 42, "2026-01-01T00:00:00Z", "Record Alpha", raw_a),
+                 ("repo/test", 42, "2026-01-01T00:00:00Z", "Record Beta", raw_b)]
+                if iteration % 2 == 0 else
+                [("repo/test", 42, "2026-01-01T00:00:00Z", "Record Beta", raw_b),
+                 ("repo/test", 42, "2026-01-01T00:00:00Z", "Record Alpha", raw_a)]
+            )
+            df = spark.createDataFrame(rows, ["repo_full_name", "id", "updated_at", "body", "_raw_record"])
+
+            dedup_window = (
+                Window.partitionBy("repo_full_name", pk_field)
+                .orderBy(
+                    F.coalesce(parse_iso_timestamp(date_col), F.to_timestamp(F.lit("1970-01-01"))).desc(),
+                    F.sha2(F.col("_raw_record"), 256).asc(),
+                )
+            )
+
+            deduped = (
+                df.withColumn("_row_num", F.row_number().over(dedup_window))
+                .filter(F.col("_row_num") == 1)
+                .drop("_row_num", "_raw_record")
+            )
+
+            result = deduped.collect()
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["body"], expected_winner_body)
+            self.assertNotIn("_raw_record", deduped.columns)
+
 
 if __name__ == "__main__":
     unittest.main()
