@@ -504,30 +504,37 @@ def log_run(spark: SparkSession, layer: str, parameter: str, batch_id: str, cata
 # 7. Quarantine Helper
 # -----------------------------------------------------------------------------
 
-def quarantine_records(
-    spark: SparkSession,
-    catalog: str,
+def build_quarantine_df(
     df_rejected: DataFrame,
     layer: str,
     entity: str,
     rejection_reason: str,
-    batch_id: str = "unknown"
-) -> int:
-    """Idempotent per (batch_id, payload, reason) quarantine sink for rejected rows."""
-    try:
-        if df_rejected.limit(1).count() == 0:
-            return 0
-    except Exception:
-        return 0
+    batch_id: str = "unknown",
+    salt: str = None,
+) -> DataFrame:
+    """Pure DataFrame transformation for quarantine records.
 
-    table_name = f"{catalog}.ops.silver_quarantine"
+    1. Serializes rejected row to JSON.
+    2. Applies scrub_emails to the raw_payload column.
+    3. Computes quarantine_id as sha2(concat(raw_payload, salt, batch_id), 256).
+    4. Deduplicates on quarantine_id before returning.
+    """
+    if salt is None:
+        try:
+            salt = get_salt()
+        except Exception:
+            salt = "default_quarantine_salt"
+
     cols = df_rejected.columns
     volatile = {"load_timestamp", "batch_id", "rejection_reason", "_raw_record"}
     payload_cols = [c for c in cols if c not in volatile]
+
     payload = F.coalesce(
         F.col("_raw_record") if "_raw_record" in cols else F.lit(None),
-        F.to_json(F.struct(*[F.col(c) for c in payload_cols]))
+        F.to_json(F.struct(*[F.col(c) for c in payload_cols])) if payload_cols else F.lit("{}")
     )
+    scrubbed_payload = scrub_emails(payload)
+
     reason_expr = F.coalesce(
         F.col("rejection_reason") if "rejection_reason" in cols else F.lit(None),
         F.lit(rejection_reason)
@@ -538,7 +545,7 @@ def quarantine_records(
         df_rejected.select(
             repo_expr.alias("repo_full_name"),
             reason_expr.alias("rejection_reason"),
-            payload.alias("raw_payload")
+            scrubbed_payload.alias("raw_payload")
         )
         .withColumn("layer", F.lit(layer))
         .withColumn("entity", F.lit(entity))
@@ -546,21 +553,46 @@ def quarantine_records(
         .withColumn(
             "quarantine_id",
             F.sha2(
-                F.concat_ws(
-                    "||",
-                    F.col("layer"),
-                    F.col("entity"),
-                    F.col("repo_full_name"),
-                    F.col("batch_id"),
-                    F.col("rejection_reason"),
+                F.concat(
                     F.col("raw_payload"),
+                    F.lit(str(salt)),
+                    F.col("batch_id"),
                 ),
                 256,
             )
         )
         .withColumn("load_timestamp", F.current_timestamp())
-        .dropDuplicates(["quarantine_id"]) 
+        .dropDuplicates(["quarantine_id"])
         .select("quarantine_id", "layer", "entity", "repo_full_name", "rejection_reason", "raw_payload", "batch_id", "load_timestamp")
+    )
+    return quarantine_df
+
+
+def quarantine_records(
+    spark: SparkSession,
+    catalog: str,
+    df_rejected: DataFrame,
+    layer: str,
+    entity: str,
+    rejection_reason: str,
+    batch_id: str = "unknown",
+    salt: str = None,
+) -> int:
+    """Idempotent per (batch_id, payload, reason) quarantine sink for rejected rows."""
+    try:
+        if df_rejected.limit(1).count() == 0:
+            return 0
+    except Exception:
+        return 0
+
+    table_name = f"{catalog}.ops.silver_quarantine"
+    quarantine_df = build_quarantine_df(
+        df_rejected=df_rejected,
+        layer=layer,
+        entity=entity,
+        rejection_reason=rejection_reason,
+        batch_id=batch_id,
+        salt=salt,
     )
 
     count = quarantine_df.count()
@@ -568,6 +600,7 @@ def quarantine_records(
         merge_delta(spark=spark, df=quarantine_df, target_table=table_name, keys=["quarantine_id"], update_all=False)
     except Exception:
         quarantine_df.write.format("delta").mode("append").option("mergeSchema", "true").saveAsTable(table_name)
+
     return count
 
 

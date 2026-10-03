@@ -363,6 +363,74 @@ class TestSparkLogic(unittest.TestCase):
             self.assertEqual(result[0]["body"], expected_winner_body)
             self.assertNotIn("_raw_record", deduped.columns)
 
+    # -------------------------------------------------------------------------
+    # BUG 5 Tests: build_quarantine_df email scrubbing and deterministic hashing
+    # -------------------------------------------------------------------------
+    @unittest.skipIf(not HAS_SPARK, "Spark JVM runtime not available in local environment")
+    def test_build_quarantine_df_email_scrubbing_and_id(self):
+        from src.common import build_quarantine_df
+
+        # 1. Feeding a DataFrame with emails in fields produces raw_payload containing '[EMAIL]' and no '@'
+        rejected_data = [
+            ("owner/repo", "Malformed commit by dev@company.com", "dev@company.com", "Corrupt JSON"),
+        ]
+        df_rejected = spark.createDataFrame(
+            rejected_data,
+            ["repo_full_name", "message", "author_email", "rejection_reason"]
+        )
+
+        q_df = build_quarantine_df(
+            df_rejected=df_rejected,
+            layer="bronze",
+            entity="commits",
+            rejection_reason="Corrupt JSON",
+            batch_id="batch_001",
+            salt="test_salt",
+        )
+        row = q_df.first()
+        payload = row["raw_payload"]
+        self.assertIn("[EMAIL]", payload)
+        self.assertNotIn("dev@company.com", payload)
+        self.assertNotIn("@", payload)
+
+        # 2. Two identical corrupt rows in the same batch collapse to one row
+        dup_data = [
+            ("owner/repo", "bad record", "Null PK"),
+            ("owner/repo", "bad record", "Null PK"),
+        ]
+        df_dup = spark.createDataFrame(dup_data, ["repo_full_name", "body", "rejection_reason"])
+        q_dup = build_quarantine_df(
+            df_rejected=df_dup,
+            layer="silver",
+            entity="issues",
+            rejection_reason="Null PK",
+            batch_id="batch_001",
+            salt="test_salt",
+        )
+        self.assertEqual(q_dup.count(), 1)
+
+        # 3. The same row in two different batches gets two different quarantine_ids
+        single_row_df = spark.createDataFrame([("owner/repo", "bad record")], ["repo_full_name", "body"])
+        q_b1 = build_quarantine_df(
+            df_rejected=single_row_df,
+            layer="bronze",
+            entity="pulls",
+            rejection_reason="Error",
+            batch_id="batch_A",
+            salt="test_salt",
+        )
+        q_b2 = build_quarantine_df(
+            df_rejected=single_row_df,
+            layer="bronze",
+            entity="pulls",
+            rejection_reason="Error",
+            batch_id="batch_B",
+            salt="test_salt",
+        )
+        id_1 = q_b1.first()["quarantine_id"]
+        id_2 = q_b2.first()["quarantine_id"]
+        self.assertNotEqual(id_1, id_2)
+
 
 if __name__ == "__main__":
     unittest.main()
