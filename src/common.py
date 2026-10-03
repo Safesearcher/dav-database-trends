@@ -351,6 +351,47 @@ def evolve_table_schema(spark, target_table: str, new_cols) -> list:
 # 6. Operational Execution Logging (ops.pipeline_execution_logs)
 # -----------------------------------------------------------------------------
 
+VALID_LOG_STATUSES = {"SUCCESS", "FAILURE"}
+
+
+def build_log_row(
+    log_id: str,
+    layer: str,
+    parameter: str,
+    batch_id: str,
+    start_time: datetime,
+    end_time: datetime,
+    status: str,
+    rows_inserted: int = 0,
+    rows_updated: int = 0,
+    error_message: str = None,
+    load_timestamp: datetime = None,
+) -> tuple:
+    """Builds a validated log row tuple matching PIPELINE_EXECUTION_LOGS_SCHEMA.
+
+    Status must strictly be 'SUCCESS' or 'FAILURE'.
+    """
+    if status not in VALID_LOG_STATUSES:
+        raise ValueError(
+            f"Invalid log status '{status}'. Must be one of {sorted(VALID_LOG_STATUSES)}."
+        )
+    if load_timestamp is None:
+        load_timestamp = datetime.now(timezone.utc)
+    return (
+        str(log_id),
+        str(layer),
+        str(parameter) if parameter is not None else None,
+        str(batch_id) if batch_id is not None else None,
+        start_time,
+        end_time,
+        status,
+        int(rows_inserted) if rows_inserted is not None else 0,
+        int(rows_updated) if rows_updated is not None else 0,
+        str(error_message) if error_message is not None else None,
+        load_timestamp,
+    )
+
+
 def start_run(spark: SparkSession, layer: str, parameter: str, batch_id: str, catalog: str = "workspace") -> dict:
     """Initializes start timestamp and unique run tracking context."""
     return {
@@ -360,8 +401,11 @@ def start_run(spark: SparkSession, layer: str, parameter: str, batch_id: str, ca
         "batch_id": batch_id,
         "catalog": catalog,
         "start_time": datetime.now(timezone.utc),
+        "status": "SUCCESS",
         "rows_inserted": 0,
         "rows_updated": 0,
+        "message": None,
+        "error_message": None,
     }
 
 
@@ -383,23 +427,20 @@ def end_run(
     from src.schemas import PIPELINE_EXECUTION_LOGS_SCHEMA
 
     table_name = f"{catalog}.ops.pipeline_execution_logs"
-    now_ts = datetime.now(timezone.utc)
+    row = build_log_row(
+        log_id=log_id,
+        layer=layer,
+        parameter=parameter,
+        batch_id=batch_id,
+        start_time=start_time,
+        end_time=end_time,
+        status=status,
+        rows_inserted=rows_inserted,
+        rows_updated=rows_updated,
+        error_message=error_message,
+    )
 
-    log_row = [(
-        log_id,
-        layer,
-        parameter if parameter is not None else None,
-        batch_id if batch_id is not None else None,
-        start_time,
-        end_time,
-        status,
-        int(rows_inserted) if rows_inserted is not None else 0,
-        int(rows_updated) if rows_updated is not None else 0,
-        str(error_message) if error_message is not None else None,
-        now_ts,
-    )]
-
-    log_df = spark.createDataFrame(log_row, schema=PIPELINE_EXECUTION_LOGS_SCHEMA)
+    log_df = spark.createDataFrame([row], schema=PIPELINE_EXECUTION_LOGS_SCHEMA)
 
     try:
         merge_delta(spark=spark, df=log_df, target_table=table_name, keys=["log_id"], update_all=False)
@@ -414,8 +455,11 @@ def log_run(spark: SparkSession, layer: str, parameter: str, batch_id: str, cata
     try:
         yield run_ctx
         end_time = datetime.now(timezone.utc)
-        if "status" not in run_ctx:
-            run_ctx["status"] = "SUCCESS"
+        status = run_ctx.get("status", "SUCCESS")
+        if status not in VALID_LOG_STATUSES:
+            status = "SUCCESS" if status not in ("FAILURE", "FAILED", "ERROR") else "FAILURE"
+        # Preserve run_ctx['message'] or run_ctx['error_message'] even on SUCCESS
+        msg = run_ctx.get("error_message") or run_ctx.get("message")
         end_run(
             spark=spark,
             log_id=run_ctx["log_id"],
@@ -424,15 +468,18 @@ def log_run(spark: SparkSession, layer: str, parameter: str, batch_id: str, cata
             batch_id=batch_id,
             start_time=run_ctx["start_time"],
             end_time=end_time,
-            status=run_ctx.get("status", "SUCCESS"),
+            status=status,
             rows_inserted=run_ctx.get("rows_inserted", 0),
             rows_updated=run_ctx.get("rows_updated", 0),
-            error_message=None,
+            error_message=msg,
             catalog=catalog,
         )
     except Exception as exc:
         end_time = datetime.now(timezone.utc)
         run_ctx["status"] = "FAILURE"
+        msg = str(exc)
+        if run_ctx.get("message"):
+            msg = f"{run_ctx.get('message')}: {msg}"
         try:
             end_run(
                 spark=spark,
@@ -442,10 +489,10 @@ def log_run(spark: SparkSession, layer: str, parameter: str, batch_id: str, cata
                 batch_id=batch_id,
                 start_time=run_ctx["start_time"],
                 end_time=end_time,
-                status=run_ctx.get("status", "FAILURE"),
+                status="FAILURE",
                 rows_inserted=run_ctx.get("rows_inserted", 0),
                 rows_updated=run_ctx.get("rows_updated", 0),
-                error_message=str(exc),
+                error_message=msg,
                 catalog=catalog,
             )
         except Exception as log_err:

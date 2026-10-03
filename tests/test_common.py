@@ -115,6 +115,76 @@ class TestCommonFunctions(unittest.TestCase):
         self.assertEqual(ctx["parameter"], "test_param")
         self.assertIn("log_id", ctx)
         self.assertIsInstance(ctx["start_time"], datetime)
+        self.assertEqual(ctx["status"], "SUCCESS")
+
+    def test_build_log_row_valid_statuses(self):
+        from src.common import build_log_row
+        now = datetime.now(timezone.utc)
+        
+        # Test SUCCESS with message
+        row_succ = build_log_row(
+            log_id="log-1",
+            layer="BRONZE",
+            parameter="test_p",
+            batch_id="b-1",
+            start_time=now,
+            end_time=now,
+            status="SUCCESS",
+            rows_inserted=10,
+            rows_updated=5,
+            error_message="PARTIAL_QUARANTINE: 2/12 records quarantined",
+        )
+        self.assertEqual(row_succ[0], "log-1")
+        self.assertEqual(row_succ[1], "BRONZE")
+        self.assertEqual(row_succ[6], "SUCCESS")
+        self.assertEqual(row_succ[7], 10)
+        self.assertEqual(row_succ[8], 5)
+        self.assertEqual(row_succ[9], "PARTIAL_QUARANTINE: 2/12 records quarantined")
+
+        # Test FAILURE with message
+        row_fail = build_log_row(
+            log_id="log-2",
+            layer="SILVER",
+            parameter="test_p2",
+            batch_id="b-2",
+            start_time=now,
+            end_time=now,
+            status="FAILURE",
+            rows_inserted=0,
+            rows_updated=0,
+            error_message="ALL_RECORDS_QUARANTINED",
+        )
+        self.assertEqual(row_fail[6], "FAILURE")
+        self.assertEqual(row_fail[9], "ALL_RECORDS_QUARANTINED")
+
+    def test_build_log_row_invalid_status_raises(self):
+        from src.common import build_log_row
+        now = datetime.now(timezone.utc)
+        for invalid_status in ["EMPTY", "ALL_QUARANTINED", "RUNNING", "PARTIAL", ""]:
+            with self.subTest(status=invalid_status):
+                with self.assertRaises(ValueError):
+                    build_log_row(
+                        log_id="log-x",
+                        layer="BRONZE",
+                        parameter="p",
+                        batch_id="b",
+                        start_time=now,
+                        end_time=now,
+                        status=invalid_status,
+                    )
+
+    def test_log_run_preserves_message_on_success(self):
+        from src.common import log_run
+        mock_spark = mock.MagicMock()
+        with log_run(mock_spark, layer="BRONZE", parameter="p", batch_id="b") as ctx:
+            ctx["message"] = "NO_DATA"
+            ctx["rows_inserted"] = 0
+            ctx["rows_updated"] = 0
+
+        self.assertTrue(mock_spark.createDataFrame.called)
+        logged_row = mock_spark.createDataFrame.call_args[0][0][0]
+        self.assertEqual(logged_row[6], "SUCCESS")
+        self.assertEqual(logged_row[9], "NO_DATA")
 
 
 if __name__ == "__main__":

@@ -337,6 +337,8 @@ def run_silver_entity(
     with log_run(spark, layer="SILVER", parameter=param_desc, batch_id=batch_id, catalog=catalog) as run_ctx:
         if not spark.catalog.tableExists(bronze_table):
             print(f"  [Skip] Bronze table {bronze_table} does not exist.")
+            run_ctx["status"] = "SUCCESS"
+            run_ctx["message"] = f"TABLE_NOT_FOUND: {bronze_table}"
             return {"bronze_count": 0, "silver_inserted": 0, "silver_updated": 0, "quarantined": 0, "excluded_prs": 0}
 
         # Read bronze source for this repository
@@ -356,6 +358,8 @@ def run_silver_entity(
         bronze_count = bronze_raw.count()
         if bronze_count == 0:
             print(f"  [Empty] 0 records found in {bronze_table} for {repo_full_name}.")
+            run_ctx["status"] = "SUCCESS"
+            run_ctx["message"] = "NO_DATA"
             return {"bronze_count": 0, "silver_inserted": 0, "silver_updated": 0, "quarantined": 0, "excluded_prs": 0}
 
         excluded_prs = 0
@@ -385,6 +389,22 @@ def run_silver_entity(
                 batch_id=batch_id
             )
             print(f"  [Quarantined] {quarantined_count} invalid records routed to {catalog}.ops.silver_quarantine.")
+
+        # Check if 100% quarantined vs partial quarantine
+        if bronze_count > 0 and quarantined_count == bronze_count:
+            print(f"  [Notice] All {bronze_count} records were quarantined.")
+            run_ctx["status"] = "FAILURE"
+            run_ctx["message"] = "ALL_RECORDS_QUARANTINED"
+            return {
+                "bronze_count": bronze_count,
+                "silver_inserted": 0,
+                "silver_updated": 0,
+                "quarantined": quarantined_count,
+                "excluded_prs": excluded_prs,
+            }
+
+        if quarantined_count > 0:
+            run_ctx["message"] = f"PARTIAL_QUARANTINE: {quarantined_count}/{bronze_count} records quarantined"
 
         # Idempotent MERGE INTO Silver Delta table
         inserted = 0

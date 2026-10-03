@@ -133,8 +133,9 @@ def process_entity(
             file_size = file_stats[0].size if file_stats else 0
             if not file_stats or file_size <= 2:
                 print(f"  [Empty] {file_path} contains 0 records. Skipping merge.")
-                run_ctx["status"] = "EMPTY"
-                return {"status": "EMPTY", "inserted": 0, "updated": 0, "drift": []}
+                run_ctx["status"] = "SUCCESS"
+                run_ctx["message"] = "NO_DATA"
+                return {"status": "SUCCESS", "inserted": 0, "updated": 0, "drift": []}
         except Exception as ls_err:
             print(f"  [Notice] Accessing {file_path}: {ls_err}")
 
@@ -144,13 +145,15 @@ def process_entity(
             if file_size > 2:
                 raise RuntimeError(f"Invalid JSON in {file_path}: file size {file_size} bytes but yielded 0 records")
             print(f"  [Empty] No rows parsed from {file_path}.")
-            run_ctx["status"] = "EMPTY"
-            return {"status": "EMPTY", "inserted": 0, "updated": 0, "drift": []}
+            run_ctx["status"] = "SUCCESS"
+            run_ctx["message"] = "NO_DATA"
+            return {"status": "SUCCESS", "inserted": 0, "updated": 0, "drift": []}
 
         # 2. Discover Schema Drift before reading
         drifted_keys = discover_drift_keys(raw_df, explicit_schema)
         if drifted_keys:
             print(f"  [Schema Drift] Detected {len(drifted_keys)} unmapped fields in raw JSON: {drifted_keys}")
+            run_ctx["parameter"] = f"{param_desc},drift_keys={','.join(drifted_keys)}"
 
         # 3. Parse records independently with PERMISSIVE mode
         parsed = parse_records(raw_df, explicit_schema, drifted_keys)
@@ -201,8 +204,12 @@ def process_entity(
 
         if valid_n == 0:
             print(f"  [Notice] Zero valid records remaining after quarantine check.")
-            run_ctx["status"] = "ALL_QUARANTINED"
-            return {"status": "ALL_QUARANTINED", "inserted": 0, "updated": 0, "drift": drifted_keys}
+            run_ctx["status"] = "FAILURE"
+            run_ctx["message"] = "ALL_RECORDS_QUARANTINED"
+            return {"status": "FAILURE", "inserted": 0, "updated": 0, "drift": drifted_keys}
+
+        if rejected_n > 0:
+            run_ctx["message"] = f"PARTIAL_QUARANTINE: {rejected_n}/{total} records quarantined"
 
         # 6. Respect since / until time filter for incremental or backfill runs
         date_col = DATE_COLUMN_MAP.get(entity_name)
