@@ -215,7 +215,7 @@ with log_run(spark, layer="SETUP", parameter=f"catalog={catalog}", batch_id=batc
     print(f"Verified all 5 Silver tables in {catalog}.{silver_schema}")
 
     # Set metrics in context
-    run_ctx["rows_inserted"] = 7  # 7 core operational and silver tables created/verified
+    run_ctx["rows_inserted"] = 12  # 2 ops + 5 silver + 5 bronze tables created/verified
     run_ctx["rows_updated"] = 0
 
 print("\nSetup notebook finished successfully. All schemas and tables initialized.")

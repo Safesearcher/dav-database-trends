@@ -260,6 +260,46 @@ def merge_delta(spark: SparkSession, df: DataFrame, target_table: str, keys: lis
     return (num_inserted, num_updated)
 
 
+def read_raw_records(spark, file_path: str):
+    """One row per JSON record (as a JSON string) in column _raw_record."""
+    txt = spark.read.text(file_path, wholetext=True)
+    arr = F.when(F.ltrim("value").startswith("["), F.col("value")) \
+           .otherwise(F.concat(F.lit("["), F.col("value"), F.lit("]")))
+    return txt.select(F.explode(F.from_json(arr, "array<string>")).alias("_raw_record"))
+
+
+def parse_records(raw_df, schema, extra_string_cols=()):
+    """Parse each record independently; schema must contain _corrupt_record."""
+    from pyspark.sql.types import StructType, StructField, StringType
+    have = set(schema.fieldNames())
+    read_schema = StructType(list(schema.fields) +
+        [StructField(c, StringType(), True) for c in extra_string_cols if c not in have])
+    parsed = raw_df.select(
+        "_raw_record",
+        F.from_json("_raw_record", read_schema,
+                    {"mode": "PERMISSIVE", "columnNameOfCorruptRecord": "_corrupt_record"}).alias("p"))
+    return parsed.select("_raw_record", "p.*")
+
+
+def discover_drift_keys(raw_df, schema) -> list:
+    """Top-level keys present in ANY record but absent from the explicit schema."""
+    expected = {f.name for f in schema.fields if f.name != "_corrupt_record"}
+    keys = raw_df.select(F.explode(F.expr("json_object_keys(_raw_record)")).alias("k")).distinct()
+    return sorted(r["k"] for r in keys.collect() if r["k"] not in expected)
+
+
+def evolve_table_schema(spark, target_table: str, new_cols) -> list:
+    if not new_cols or not spark.catalog.tableExists(target_table):
+        return []
+    existing = {c.lower() for c in spark.table(target_table).columns}
+    added = []
+    for c in new_cols:
+        if c.lower() not in existing:
+            spark.sql(f"ALTER TABLE {target_table} ADD COLUMNS (`{c}` STRING)")
+            added.append(c)
+    return added
+
+
 # -----------------------------------------------------------------------------
 # 6. Operational Execution Logging (ops.pipeline_execution_logs)
 # -----------------------------------------------------------------------------
@@ -331,7 +371,8 @@ def log_run(spark: SparkSession, layer: str, parameter: str, batch_id: str, cata
     try:
         yield run_ctx
         end_time = datetime.now(timezone.utc)
-        run_ctx["status"] = "SUCCESS"
+        if "status" not in run_ctx:
+            run_ctx["status"] = "SUCCESS"
         end_run(
             spark=spark,
             log_id=run_ctx["log_id"],

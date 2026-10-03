@@ -45,6 +45,11 @@ from src.common import (
     merge_delta,
     quarantine_records,
     parse_iso_timestamp,
+    read_raw_records,
+    parse_records,
+    discover_drift_keys,
+    evolve_table_schema,
+    DATE_COLUMN_MAP,
 )
 
 # Parse parameters with safe fallbacks
@@ -83,14 +88,6 @@ ALL_REPOS = [
 
 ALL_ENTITIES = ["repo_metadata", "commits", "issues", "pulls", "releases"]
 
-DATE_COLUMN_MAP = {
-    "commits": "commit.committer.date",
-    "issues": "updated_at",
-    "pulls": "updated_at",
-    "releases": "published_at",
-    "repo_metadata": "updated_at",
-}
-
 TABLE_NAME_MAP = {
     "commits": "commits",
     "issues": "issues",
@@ -100,26 +97,6 @@ TABLE_NAME_MAP = {
 }
 
 # COMMAND ----------
-def detect_schema_drift(file_path: str, expected_schema) -> list:
-    """
-    Inspects incoming JSON file sample to detect extra top-level fields
-    that are not declared in the explicit schema.
-    """
-    try:
-        if os.path.exists(file_path):
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            sample = data[0] if isinstance(data, list) and len(data) > 0 else data
-            if isinstance(sample, dict):
-                expected_keys = {f.name for f in expected_schema.fields if f.name != "_corrupt_record"}
-                actual_keys = set(sample.keys())
-                drifted = sorted(list(actual_keys - expected_keys))
-                return drifted
-    except Exception:
-        pass
-    return []
-
-
 def process_entity(
     repo_slug: str,
     entity_name: str,
@@ -150,61 +127,71 @@ def process_entity(
 
     with log_run(spark, layer="BRONZE", parameter=param_desc, batch_id=batch_id, catalog=catalog) as run_ctx:
         # Check source file existence and non-empty status
+        file_size = 0
         try:
             file_stats = dbutils.fs.ls(file_path)
-            if not file_stats or file_stats[0].size <= 2:
+            file_size = file_stats[0].size if file_stats else 0
+            if not file_stats or file_size <= 2:
                 print(f"  [Empty] {file_path} contains 0 records. Skipping merge.")
+                run_ctx["status"] = "EMPTY"
                 return {"status": "EMPTY", "inserted": 0, "updated": 0, "drift": []}
         except Exception as ls_err:
             print(f"  [Notice] Accessing {file_path}: {ls_err}")
 
-        # 1. Detect Schema Drift before reading
-        drifted_keys = detect_schema_drift(file_path, explicit_schema)
+        # 1. Read raw records independently
+        raw_df = read_raw_records(spark, file_path)
+        if raw_df.limit(1).count() == 0:
+            if file_size > 2:
+                raise RuntimeError(f"Invalid JSON in {file_path}: file size {file_size} bytes but yielded 0 records")
+            print(f"  [Empty] No rows parsed from {file_path}.")
+            run_ctx["status"] = "EMPTY"
+            return {"status": "EMPTY", "inserted": 0, "updated": 0, "drift": []}
+
+        # 2. Discover Schema Drift before reading
+        drifted_keys = discover_drift_keys(raw_df, explicit_schema)
         if drifted_keys:
             print(f"  [Schema Drift] Detected {len(drifted_keys)} unmapped fields in raw JSON: {drifted_keys}")
-            # Note extra fields in audit parameters
-            run_ctx["parameter"] = f"{param_desc},drift_keys={drifted_keys[:5]}"
 
-        # 2. Read raw JSON with explicit schema and PERMISSIVE mode (Zero inference)
-        raw_df = (
-            spark.read.format("json")
-            .schema(explicit_schema)
-            .option("multiline", "true")
-            .option("mode", "PERMISSIVE")
-            .option("columnNameOfCorruptRecord", "_corrupt_record")
-            .load(file_path)
-        )
+        # 3. Parse records independently with PERMISSIVE mode
+        parsed = parse_records(raw_df, explicit_schema, drifted_keys)
 
-        if raw_df.limit(1).count() == 0:
-            print(f"  [Empty] No rows parsed from {file_path}.")
-            return {"status": "EMPTY", "inserted": 0, "updated": 0, "drift": drifted_keys}
-
-        # 3. Add lineage and audit metadata
+        # 4. Add lineage and audit metadata
         enriched_df = (
-            raw_df
+            parsed
             .withColumn("repo_full_name", F.lit(repo_full_name))
             .withColumn("_source_file", F.lit(file_path))
             .withColumn("batch_id", F.lit(batch_id))
             .withColumn("load_timestamp", F.current_timestamp())
         )
 
-        # 4. Quarantine Check: corrupt records or null primary key
+        # 5. Quarantine Check: corrupt records or null primary key
         is_corrupt = F.col("_corrupt_record").isNotNull()
         is_null_pk = F.col(pk_field).isNull()
         rejected_cond = is_corrupt | is_null_pk
 
-        rejected_df = enriched_df.filter(rejected_cond)
-        valid_df = enriched_df.filter(~rejected_cond).drop("_corrupt_record")
+        # Silent-loss guard: single aggregation for counts
+        counts = enriched_df.agg(
+            F.count("*").alias("total"),
+            F.count(F.when(~rejected_cond, 1)).alias("valid_n"),
+            F.count(F.when(rejected_cond, 1)).alias("rejected_n"),
+        ).first()
+        total = counts["total"]
+        valid_n = counts["valid_n"]
+        rejected_n = counts["rejected_n"]
+        if valid_n + rejected_n != total:
+            raise RuntimeError(f"Silent loss detected in {file_path}: total={total}, valid={valid_n}, rejected={rejected_n}")
 
-        if rejected_df.limit(1).count() > 0:
-            rejection_expr = F.when(is_corrupt, F.lit("Corrupt JSON payload / parse error")).otherwise(
-                F.lit(f"Null primary key ({pk_field})")
-            )
-            tagged_rejected = rejected_df.withColumn("rejection_reason", rejection_expr)
+        rejection_expr = F.when(is_corrupt, F.lit("Corrupt or type-mismatched JSON record")).otherwise(
+            F.lit(f"Null primary key ({pk_field})")
+        )
+        rejected_df = enriched_df.filter(rejected_cond).withColumn("rejection_reason", rejection_expr)
+        valid_df = enriched_df.filter(~rejected_cond).drop("_corrupt_record", "_raw_record")
+
+        if rejected_n > 0:
             q_count = quarantine_records(
                 spark=spark,
                 catalog=catalog,
-                df_rejected=tagged_rejected,
+                df_rejected=rejected_df,
                 layer="bronze",
                 entity=entity_name,
                 rejection_reason="Quarantined during Bronze ingestion",
@@ -212,11 +199,12 @@ def process_entity(
             )
             print(f"  [Quarantine] Routed {q_count} records to {catalog}.ops.silver_quarantine.")
 
-        if valid_df.limit(1).count() == 0:
+        if valid_n == 0:
             print(f"  [Notice] Zero valid records remaining after quarantine check.")
+            run_ctx["status"] = "ALL_QUARANTINED"
             return {"status": "ALL_QUARANTINED", "inserted": 0, "updated": 0, "drift": drifted_keys}
 
-        # 5. Respect since / until time filter for incremental or backfill runs
+        # 6. Respect since / until time filter for incremental or backfill runs
         date_col = DATE_COLUMN_MAP.get(entity_name)
         if run_mode in ("incremental", "backfill") and date_col:
             date_expr = parse_iso_timestamp(date_col)
@@ -225,16 +213,16 @@ def process_entity(
             if until_str:
                 valid_df = valid_df.filter(date_expr <= F.to_timestamp(F.lit(until_str)))
 
-        # 6. Deduplicate incoming batch on primary key, keeping latest updated_at
+        # 7. Deduplicate incoming batch on primary key, keeping latest date
         if date_col:
             dedup_window = (
                 Window.partitionBy("repo_full_name", pk_field)
-                .orderBy(F.coalesce(parse_iso_timestamp(date_col), F.to_timestamp(F.lit("1970-01-01"))).desc())
+                .orderBy(F.coalesce(parse_iso_timestamp(date_col), F.to_timestamp(F.lit("1970-01-01"))).desc(), F.col("_source_file").asc())
             )
         else:
             dedup_window = (
                 Window.partitionBy("repo_full_name", pk_field)
-                .orderBy(F.col("load_timestamp").desc())
+                .orderBy(F.col("load_timestamp").desc(), F.col("_source_file").asc())
             )
 
         deduped_df = (
@@ -244,7 +232,8 @@ def process_entity(
             .drop("_row_num")
         )
 
-        # 7. MERGE INTO bronze.<entity> on (repo_full_name, primary_key) with schema evolution
+        # 8. Evolve table schema and MERGE INTO bronze.<entity>
+        added = evolve_table_schema(spark, target_table, drifted_keys)
         merge_keys = ["repo_full_name", pk_field]
         inserted, updated = merge_delta(
             spark=spark,
@@ -256,6 +245,7 @@ def process_entity(
 
         run_ctx["rows_inserted"] = inserted
         run_ctx["rows_updated"] = updated
+        run_ctx["parameter"] = f"{param_desc},drift_keys={drifted_keys[:10]},evolved={added}"
 
         print(f"  [Merge Complete] {target_table} -> Inserted: {inserted}, Updated: {updated}")
         return {"status": "SUCCESS", "inserted": inserted, "updated": updated, "drift": drifted_keys}
@@ -353,3 +343,19 @@ try:
     )
 except Exception as log_err:
     print(f"Could not query operational execution logs: {log_err}")
+
+failed_entities = [r for r in batch_results if str(r.get("status", "")).startswith("FAILED")]
+if failed_entities:
+    raise RuntimeError(f"{len(failed_entities)} entity run(s) failed: {failed_entities}")
+
+summary = {
+    "batch_id": batch_id,
+    "total_inserted": total_inserted,
+    "total_updated": total_updated,
+    "results": batch_results,
+}
+try:
+    dbutils.notebook.exit(json.dumps(summary))
+except Exception:
+    pass
+
