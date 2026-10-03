@@ -22,23 +22,36 @@
 # MAGIC %md ## ── Global Widgets & Helpers ──
 
 # COMMAND ----------
-dbutils.widgets.text("catalog",    "workspace",              "Unity Catalog Name")
-dbutils.widgets.text("base_path",  "/Volumes/workspace/bronze_data/raw", "Volume Base Path")
-dbutils.widgets.text("batch_id",   "",                       "Batch ID (empty = auto)")
-dbutils.widgets.text("nb_02_path", "notebooks/02_raw_to_bronze",   "Path to notebook 02")
-dbutils.widgets.text("nb_03_path", "notebooks/03_bronze_to_silver","Path to notebook 03")
-dbutils.widgets.text("timeout_s",  "3600",                   "Notebook timeout (seconds)")
+dbutils.widgets.text("catalog",        "workspace",                         "Unity Catalog Name")
+dbutils.widgets.text("base_path",      "/Volumes/workspace/bronze_data/raw", "Volume Base Path")
+dbutils.widgets.text("batch_id",       "",                                   "Batch ID (empty = auto)")
+dbutils.widgets.text("nb_02_path",     "notebooks/02_raw_to_bronze",         "Path to notebook 02")
+dbutils.widgets.text("nb_03_path",     "notebooks/03_bronze_to_silver",      "Path to notebook 03")
+dbutils.widgets.text("timeout_s",      "3600",                               "Notebook timeout (seconds)")
+# Section A/D date window — override these to change which window is fetched
+dbutils.widgets.text("incr_since",     "2026-09-25T00:00:00Z",               "Section A+D: incremental since")
+dbutils.widgets.text("incr_until",     "",                                   "Section A+D: incremental until (empty = unbounded)")
+# Section B backfill parameters
+dbutils.widgets.text("backfill_repo",  "surrealdb/surrealdb",                "Section B: repo for backfill")
+dbutils.widgets.text("backfill_since", "2026-04-01T00:00:00Z",               "Section B: backfill window start")
+dbutils.widgets.text("backfill_until", "2026-06-30T23:59:59Z",               "Section B: backfill window end")
 
 # COMMAND ----------
 import uuid
 from datetime import datetime, timezone
 
-CATALOG    = dbutils.widgets.get("catalog")
-BASE_PATH  = dbutils.widgets.get("base_path")
-NB_02      = dbutils.widgets.get("nb_02_path")
-NB_03      = dbutils.widgets.get("nb_03_path")
-TIMEOUT    = int(dbutils.widgets.get("timeout_s"))
-BATCH_ID   = dbutils.widgets.get("batch_id") or f"run_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:6]}"
+CATALOG        = dbutils.widgets.get("catalog")
+BASE_PATH      = dbutils.widgets.get("base_path")
+NB_02          = dbutils.widgets.get("nb_02_path")
+NB_03          = dbutils.widgets.get("nb_03_path")
+TIMEOUT        = int(dbutils.widgets.get("timeout_s"))
+BATCH_ID       = dbutils.widgets.get("batch_id") or f"run_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:6]}"
+# Section-scoped date params (read from widgets — override in the widget bar)
+INCR_SINCE     = dbutils.widgets.get("incr_since")
+INCR_UNTIL     = dbutils.widgets.get("incr_until")
+BACKFILL_REPO  = dbutils.widgets.get("backfill_repo")
+BACKFILL_SINCE = dbutils.widgets.get("backfill_since")
+BACKFILL_UNTIL = dbutils.widgets.get("backfill_until")
 
 ALL_REPOS = [
     "postgres/postgres",
@@ -116,8 +129,9 @@ def show_logs(label="", n=10):
 
 # COMMAND ----------
 # ── A-1 : Configure incremental window ──────────────────────────────────────
-A_SINCE     = "2026-09-25T00:00:00Z"
-A_UNTIL     = ""                       # empty = no upper bound
+# Dates driven by widgets 'incr_since' and 'incr_until' set in the widget bar above.
+A_SINCE     = INCR_SINCE          # widget: incr_since  (e.g. 2026-09-25T00:00:00Z)
+A_UNTIL     = INCR_UNTIL          # widget: incr_until  (empty = no upper bound)
 A_RUN_MODE  = "incremental"
 A_BATCH_ID  = f"{BATCH_ID}_incr"
 
@@ -173,9 +187,10 @@ show_logs("after SECTION A", n=10)
 
 # COMMAND ----------
 # ── B-1 : Configure backfill window ─────────────────────────────────────────
-B_REPO      = "surrealdb/surrealdb"    # target repo for backfill
-B_SINCE     = "2026-04-01T00:00:00Z"  # start of Phase 2 collection window
-B_UNTIL     = "2026-06-30T23:59:59Z"  # end of backfill window (Q1 FY26)
+# All three values driven by widgets: backfill_repo, backfill_since, backfill_until.
+B_REPO      = BACKFILL_REPO        # widget: backfill_repo
+B_SINCE     = BACKFILL_SINCE       # widget: backfill_since
+B_UNTIL     = BACKFILL_UNTIL       # widget: backfill_until
 B_RUN_MODE  = "backfill"
 B_BATCH_ID  = f"{BATCH_ID}_backfill"
 
@@ -336,9 +351,11 @@ quarantine_df.select(
 
 # COMMAND ----------
 # ── D-1 : Configure idempotency test ────────────────────────────────────────
-D_REPO      = "redis/redis"
-D_SINCE     = "2026-09-01T00:00:00Z"
-D_UNTIL     = ""
+# Reuses the same incremental window so the proof runs on real fetched data.
+# D_REPO is intentionally hardcoded to a single repo to keep the proof fast.
+D_REPO      = "redis/redis"        # fixed: single repo for the proof
+D_SINCE     = INCR_SINCE           # widget: incr_since (same window as Section A)
+D_UNTIL     = INCR_UNTIL           # widget: incr_until
 D_RUN_MODE  = "incremental"
 D_BATCH_ID  = f"{BATCH_ID}_idempotency_proof"   # fixed ID — MUST be the same on both runs
 

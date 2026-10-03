@@ -20,6 +20,7 @@
 10. [Schema Drift Handling](#10-schema-drift-handling)
 11. [PII Handling](#11-pii-handling)
 12. [Known Caveats](#12-known-caveats)
+13. [Screenshots Checklist](#13-screenshots-checklist)
 
 ---
 
@@ -627,3 +628,34 @@ Author and committer emails in `commits.json` are **direct PII** subject to GDPR
 | 6 | **Qdrant start date** | `qdrant/qdrant` | Repository created in 2021; the 6-month analysis window (Apr–Sep 2026) captures only recent activity. Historical commit data is not available through the 2,000-record API cap. |
 | 7 | **Pagination cap (2,000 records)** | All high-velocity repos | CockroachDB (1.4%), MongoDB (1.2%), PostgreSQL (3.2%) cover only recent 2026 history. Cross-repo comparisons must use per-unit-time velocity (e.g. commits/week), not all-time totals. |
 | 8 | **Releases feed gap** | Cassandra, CockroachDB, MongoDB, Postgres | 4 of 10 repos have 0 `silver.releases` rows. Release cadence comparison is only valid across the remaining 6. |
+
+---
+
+## 13. Screenshots Checklist
+
+Full checklist with priority, notebook/page, and what to show.
+See the companion file [`docs/screenshots/CHECKLIST.md`](docs/screenshots/CHECKLIST.md)
+for exact instructions on each screenshot.
+
+| # | Filename | Priority | Notebook / Page | What to capture |
+|---|---|---|---|---|
+| 1 | `01_unity_catalog_schemas.png` | ⭐ Must | Databricks Catalog Explorer | `bronze`, `silver`, `ops` schemas visible with table counts |
+| 2 | `02_volumes_structure.png` | ⭐ Must | Databricks Catalog → Volumes | Volume tree showing `raw/<owner>_<repo>/` folders |
+| 3 | `03_setup_notebook_success.png` | ⭐ Must | `01_setup.py` — full run | All cells green; last cell prints table names created |
+| 4 | `04_bronze_merge_output.png` | ⭐ Must | `02_raw_to_bronze.py` — one repo | Cell output showing rows_inserted, rows_updated, batch_id |
+| 5 | `05_silver_merge_output.png` | ⭐ Must | `03_bronze_to_silver.py` — one repo | Reconciliation table printed (Bronze vs Silver vs Quarantine) |
+| 6 | `06_pipeline_execution_logs.png` | ⭐ Must | Databricks SQL / notebook | `SELECT * FROM ops.pipeline_execution_logs ORDER BY start_time DESC LIMIT 20` result |
+| 7 | `07_silver_quarantine_sample.png` | ⭐ Must | Databricks SQL / notebook | `SELECT * FROM ops.silver_quarantine LIMIT 10` with rejection reasons visible |
+| 8 | `08_bronze_table_schema.png` | ⭐ Must | Catalog Explorer → `bronze.commits` | Schema tab showing all column names and types |
+| 9 | `09_silver_table_schema.png` | ⭐ Must | Catalog Explorer → `silver.commits` | Schema tab — confirm `author_email_hash` present, no `email` column |
+| 10 | `10_row_counts_all_tables.png` | ⭐ Must | Databricks SQL | Query: `SELECT 'bronze.commits', COUNT(*) FROM bronze.commits UNION ALL ...` |
+| 11 | `11_incremental_run_widgets.png` | ⭐ Must | `04_run_pipeline.py` widget bar | All 6 widgets set to incremental run values |
+| 12 | `12_backfill_run_widgets.png` | ⭐ Must | `04_run_pipeline.py` widget bar | Widgets set to backfill values (surrealdb, explicit since/until) |
+| 13 | `13_idempotency_proof.png` | ⭐ Must | `04_run_pipeline.py` — Section D | Console showing all `✓ PASS: ... count=N (unchanged)` lines |
+| 14 | `14_drift_test_bronze_schema_evolved.png` | ⭐ Must | Catalog → `bronze.issues` schema | `new_field_test` column visible after drift run |
+| 15 | `15_drift_test_quarantine_rows.png` | ⭐ Must | Databricks SQL | Quarantine query filtered to `batch_id LIKE '%_drift'` showing type_mismatch + unparseable_date |
+| 16 | `16_secrets_scope.png` | ★ Nice | Databricks Secrets CLI or UI | Secret scope `dbtrends` with key `salt` listed (value hidden) |
+| 17 | `17_git_folder_import.png` | ★ Nice | Databricks Workspace → Git Folders | Notebooks listed under the Git folder |
+| 18 | `18_bronze_delta_history.png` | ★ Nice | Databricks SQL | `DESCRIBE HISTORY bronze.commits` — shows MERGE operations with timestamps |
+| 19 | `19_silver_issues_cassandra_zero.png` | ★ Nice | Databricks SQL | `SELECT COUNT(*) FROM silver.issues WHERE repo_full_name='apache/cassandra'` → 0 |
+| 20 | `20_silver_issues_postgres_zero.png` | ★ Nice | Databricks SQL | Same query for `postgres/postgres` → 0 |

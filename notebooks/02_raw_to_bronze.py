@@ -14,13 +14,13 @@
 # MAGIC 8. **Multi-Repo Batch:** Supports `repo='ALL'` to process all 10 repos x 5 entities sequentially.
 
 # COMMAND ----------
-dbutils.widgets.text("catalog", "workspace", "Unity Catalog Name")
-dbutils.widgets.text("repo", "surrealdb_surrealdb", "Repository Slug or 'ALL'")
+dbutils.widgets.text("catalog",   "workspace",                         "Unity Catalog Name")
+dbutils.widgets.text("repo",      "surrealdb/surrealdb",               "Repository (owner/repo) or 'ALL'")
 dbutils.widgets.dropdown("entity", "commits", ["commits", "issues", "pulls", "releases", "repo_metadata", "ALL"], "Entity Name")
-dbutils.widgets.text("base_path", "/Volumes/workspace/bronze/raw_json", "Volume Storage Base Path")
-dbutils.widgets.text("since", "2026-04-01T00:00:00Z", "Since Filter Timestamp")
-dbutils.widgets.text("until", "2026-10-01T00:00:00Z", "Until Filter Timestamp")
-dbutils.widgets.text("batch_id", "", "Batch Run ID (Empty for auto-generated)")
+dbutils.widgets.text("base_path", "/Volumes/workspace/bronze_data/raw", "Volume Storage Base Path")  # must match 04_run_pipeline base_path widget
+dbutils.widgets.text("since",     "",                                   "Since Filter Timestamp (ISO-8601, empty = no lower bound)")
+dbutils.widgets.text("until",     "",                                   "Until Filter Timestamp (ISO-8601, empty = no upper bound)")
+dbutils.widgets.text("batch_id",  "",                                   "Batch Run ID (empty = auto-generated)")
 dbutils.widgets.dropdown("run_mode", "full", ["full", "incremental", "backfill"], "Execution Run Mode")
 
 # COMMAND ----------
