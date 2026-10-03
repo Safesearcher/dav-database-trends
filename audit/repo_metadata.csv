@@ -1,0 +1,11 @@
+repo,category,full_name,description_present,language,stars,forks,open_issues_count,license_spdx,archived,fork,default_branch,created_at,pushed_at,topics_count,architectural_notes
+apache_cassandra,Key-value / wide-column,apache/cassandra,True,Java,10111,4119,549,Apache-2.0,False,False,trunk,2009-05-21T02:10:09Z,2026-09-30T09:23:22Z,3,Issues disabled on GitHub (uses ASF Jira); PRs captured via /pulls.
+chroma-core_chroma,Vector,chroma-core/chroma,True,Rust,29413,2540,905,Apache-2.0,False,False,main,2022-10-05T17:58:44Z,2026-09-30T16:28:53Z,6,Standard active open-source repo.
+cockroachdb_cockroach,Relational,cockroachdb/cockroach,True,Go,32536,4123,8403,NOASSERTION,False,False,master,2014-02-06T00:18:47Z,2026-09-24T19:29:31Z,6,BSL-1.1 license; high automated bot commit velocity.
+facebookresearch_faiss,Vector,facebookresearch/faiss,True,C++,40999,4536,333,MIT,False,False,main,2017-02-07T16:07:05Z,2026-09-29T20:42:54Z,0,Standard active open-source repo.
+milvus-io_milvus,Vector,milvus-io/milvus,True,Go,46289,4279,1426,Apache-2.0,False,False,master,2019-09-16T06:43:43Z,2026-09-30T14:57:38Z,18,Standard active open-source repo.
+mongodb_mongo,Document/multi-model,mongodb/mongo,True,C++,28613,5815,36,NOASSERTION,False,False,master,2009-01-15T16:15:18Z,2026-09-30T16:22:01Z,4,Issues disabled on GitHub (uses MongoDB Jira); PRs captured.
+postgres_postgres,Relational,postgres/postgres,True,C,22246,5923,0,NOASSERTION,False,False,master,2010-09-21T11:35:45Z,2026-09-30T12:41:21Z,0,Git read-only mirror of postgresql.org; GitHub Issues & PRs disabled by design.
+qdrant_qdrant,Vector,qdrant/qdrant,True,Rust,34888,2714,733,Apache-2.0,False,False,master,2020-05-30T21:37:01Z,2026-09-30T15:56:02Z,20,Standard active open-source repo.
+redis_redis,Key-value / wide-column,redis/redis,True,C,76558,24827,2988,NOASSERTION,False,False,unstable,2009-03-21T22:32:25Z,2026-09-30T12:02:11Z,20,License RSALv2/SSPLv1; releases feed active.
+surrealdb_surrealdb,Document/multi-model,surrealdb/surrealdb,True,Rust,33087,1367,690,NOASSERTION,False,False,main,2021-12-09T15:03:29Z,2026-09-28T11:40:46Z,18,Standard active open-source repo.

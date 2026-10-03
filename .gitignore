@@ -12,3 +12,14 @@ __pycache__/
 *.crc
 _SUCCESS
 github_api.txt
+
+# data layers
+bronze/
+silver/
+gold/
+logs/
+
+# environment & secrets
+.salt
+.venv/
+

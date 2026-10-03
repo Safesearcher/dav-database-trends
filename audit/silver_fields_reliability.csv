@@ -1,0 +1,50 @@
+entity,field_path,overall_presence_rate,overall_null_rate,observed_types,repos_covered_count,reliability_status,silver_handling_guideline
+commits,sha,100.0,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+commits,commit.author.name,100.0,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+commits,commit.author.email,100.0,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+commits,commit.author.date,100.0,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+commits,commit.committer.name,100.0,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+commits,commit.committer.email,100.0,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+commits,commit.committer.date,100.0,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+commits,commit.message,100.0,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+commits,author.login,97.89,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+commits,committer.login,98.42,0.0,str,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+issues,id,100.0,0.0,int,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+issues,number,100.0,0.0,int,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+issues,state,100.0,0.0,str,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+issues,title,100.0,0.0,str,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+issues,user.login,100.0,0.0,str,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+issues,created_at,100.0,0.0,str,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+issues,closed_at,100.0,20.21,NoneType|str,9,RELIABLE WITH NULLS,"Expected nulls (e.g. closed_at, merged_at, milestone). Handle with coalesce or default placeholders."
+issues,comments,100.0,0.0,int,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+issues,author_association,100.0,0.0,str,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+issues,milestone.title,13.49,0.0,str,6,VOLATILE,High null or missing rate. Use defensive casting and left joins.
+pulls,id,100.0,0.0,int,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+pulls,number,100.0,0.0,int,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+pulls,state,100.0,0.0,str,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+pulls,title,100.0,0.0,str,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+pulls,user.login,100.0,0.0,str,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+pulls,created_at,100.0,0.0,str,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+pulls,closed_at,100.0,15.01,NoneType|str,9,RELIABLE WITH NULLS,"Expected nulls (e.g. closed_at, merged_at, milestone). Handle with coalesce or default placeholders."
+pulls,merged_at,100.0,39.98,NoneType|str,9,VOLATILE,High null or missing rate. Use defensive casting and left joins.
+pulls,draft,100.0,0.0,bool,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+pulls,comments,0.0,0.0,None,0,UNRELIABLE / MISSING,Field absent across Bronze files. Must substitute or handle as optional.
+pulls,author_association,100.0,0.0,str,9,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+releases,id,100.0,0.0,int,6,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+releases,tag_name,100.0,0.0,str,6,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+releases,name,100.0,0.0,str,6,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+releases,published_at,100.0,0.0,str,6,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+releases,prerelease,100.0,0.0,bool,6,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+releases,draft,100.0,0.0,bool,6,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+repo_metadata,id,100.0,0.0,int,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+repo_metadata,name,100.0,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+repo_metadata,full_name,100.0,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+repo_metadata,description,100.0,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+repo_metadata,language,100.0,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+repo_metadata,stargazers_count,100.0,0.0,int,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+repo_metadata,forks_count,100.0,0.0,int,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+repo_metadata,open_issues_count,100.0,0.0,int,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+repo_metadata,license.spdx_id,100.0,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+repo_metadata,archived,100.0,0.0,bool,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+repo_metadata,created_at,100.0,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.
+repo_metadata,pushed_at,100.0,0.0,str,10,HIGHLY RELIABLE,Directly usable as primary/foreign keys or mandatory dimensions.

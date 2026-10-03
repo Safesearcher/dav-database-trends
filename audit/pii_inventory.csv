@@ -1,0 +1,51 @@
+repo,field_name,pii_classification,total_occurrences,unique_values_count,masked_examples,recommended_silver_handling
+apache_cassandra,commit.author.email,Direct Email,696,81,a***l@k***.com; s***a@g***.com; 1***g@u***.noreply.github.com,SHA-256 salted hash
+apache_cassandra,commit.committer.email,Direct Email,696,20,m***f@a***.org; d***l@a***.org; m***k@a***.org,SHA-256 salted hash
+apache_cassandra,commit.author.name,Real Name,696,82,N***a E***v; a***u; n***y,Mask/Drop in public Gold
+apache_cassandra,commit.committer.name,Real Name,696,20,F***o G***o; m***k; M***k S***b W***r,Mask/Drop in public Gold
+apache_cassandra,commit.message (embedded emails),Embedded Email in text,39,28,c***k@n***.com; c***a@u***.noreply.github.com; d***l@g***.com,SHA-256 salted hash
+chroma-core_chroma,commit.author.email,Direct Email,418,25,g***n@g***.com; t***@t***.com; d***n@c***.org,SHA-256 salted hash
+chroma-core_chroma,commit.committer.email,Direct Email,418,1,n***y@g***.com,SHA-256 salted hash
+chroma-core_chroma,commit.author.name,Real Name,418,24,M***k M***d; H***d B***r; i***h,Mask/Drop in public Gold
+chroma-core_chroma,commit.committer.name,Real Name,418,1,G***b,Mask/Drop in public Gold
+chroma-core_chroma,commit.message (embedded emails),Embedded Email in text,67,7,t***2@l***.com; c***t@c***.com; s***a@S***.local,SHA-256 salted hash
+cockroachdb_cockroach,commit.author.email,Direct Email,2492,92,b***y@c***.com; 8***]@u***.noreply.github.com; a***u@c***.com,SHA-256 salted hash
+cockroachdb_cockroach,commit.committer.email,Direct Email,2492,89,b***y@c***.com; a***u@c***.com; a***n@c***.com,SHA-256 salted hash
+cockroachdb_cockroach,commit.author.name,Real Name,2492,90,S***t K***a; B***n D***n; A***y J***i,Mask/Drop in public Gold
+cockroachdb_cockroach,commit.committer.name,Real Name,2492,88,S***t K***a; G***b; B***n D***n,Mask/Drop in public Gold
+cockroachdb_cockroach,commit.message (embedded emails),Embedded Email in text,782,10,w***i@c***.com; a***r@g***.ch; m***h@u***.noreply.github.com,SHA-256 salted hash
+facebookresearch_faiss,commit.author.email,Direct Email,461,104,3***r@u***.noreply.github.com; r***v@i***.com; t***n@m***.com,SHA-256 salted hash
+facebookresearch_faiss,commit.committer.email,Direct Email,461,1,2***]@u***.noreply.github.com,SHA-256 salted hash
+facebookresearch_faiss,commit.author.name,Real Name,461,103,A***n M***a; J***n G***s; l***4,Mask/Drop in public Gold
+facebookresearch_faiss,commit.committer.name,Real Name,461,1,m***],Mask/Drop in public Gold
+facebookresearch_faiss,commit.message (embedded emails),Embedded Email in text,9,3,l***g@i***.ac.cn; y***g@i***.iscas.ac.cn; h***e@f***.com,SHA-256 salted hash
+milvus-io_milvus,commit.author.email,Direct Email,1364,81,h***g@z***.com; l***n@o***.com; 4***d@u***.noreply.github.com,SHA-256 salted hash
+milvus-io_milvus,commit.committer.email,Direct Email,1364,1,n***y@g***.com,SHA-256 salted hash
+milvus-io_milvus,commit.author.name,Real Name,1364,78,K***n V***v; S***d; B***i S***n,Mask/Drop in public Gold
+milvus-io_milvus,commit.committer.name,Real Name,1364,1,G***b,Mask/Drop in public Gold
+milvus-io_milvus,commit.message (embedded emails),Embedded Email in text,2154,104,h***g@z***.com; s***t@m***.com; k***1@g***.com,SHA-256 salted hash
+mongodb_mongo,commit.author.email,Direct Email,5839,306,9***u@u***.noreply.github.com; f***2@g***.com; s***g@m***.com,SHA-256 salted hash
+mongodb_mongo,commit.committer.email,Direct Email,5839,1,m***t@m***.com,SHA-256 salted hash
+mongodb_mongo,commit.author.name,Real Name,5839,303,a***n; n***B; N***k Z***z,Mask/Drop in public Gold
+mongodb_mongo,commit.committer.name,Real Name,5839,1,M***B B***t,Mask/Drop in public Gold
+mongodb_mongo,commit.message (embedded emails),Embedded Email in text,1030,192,p***o@u***.noreply.github.com; H***e@u***.noreply.github.com; b***y@m***.com,SHA-256 salted hash
+postgres_postgres,commit.author.email,Direct Email,1674,30,t***o@p***.org; j***s@p***.org; p***r@e***.org,SHA-256 salted hash
+postgres_postgres,commit.committer.email,Direct Email,1674,30,t***o@p***.org; j***s@p***.org; p***r@e***.org,SHA-256 salted hash
+postgres_postgres,commit.author.name,Real Name,1674,30,T***s M***o; T***o I***i; B***e M***n,Mask/Drop in public Gold
+postgres_postgres,commit.committer.name,Real Name,1674,30,T***s M***o; T***o I***i; B***e M***n,Mask/Drop in public Gold
+postgres_postgres,commit.message (embedded emails),Embedded Email in text,4836,1321,l***e@c***.at; k***k@g***.ru; 7***3@g***.com,SHA-256 salted hash
+qdrant_qdrant,commit.author.email,Direct Email,1271,61,5***c@u***.noreply.github.com; a***v@g***.com; o***h@g***.com,SHA-256 salted hash
+qdrant_qdrant,commit.committer.email,Direct Email,1271,3,a***y@v***.com; t***m@v***.me; n***y@g***.com,SHA-256 salted hash
+qdrant_qdrant,commit.author.name,Real Name,1271,61,S***n D***a; A***n K***v; x***c,Mask/Drop in public Gold
+qdrant_qdrant,commit.committer.name,Real Name,1271,3,G***b; t***e; g***l,Mask/Drop in public Gold
+qdrant_qdrant,commit.message (embedded emails),Embedded Email in text,1729,32,q***t@u***.noreply.github.com; s***7@u***.noreply.github.com; x***w@g***.com,SHA-256 salted hash
+redis_redis,commit.author.email,Direct Email,313,93,m***s@g***.com; r***u@t***.com; 8***i@u***.noreply.github.com,SHA-256 salted hash
+redis_redis,commit.committer.email,Direct Email,313,4,s***6@g***.com; d***n@r***.com; 3***n@u***.noreply.github.com,SHA-256 salted hash
+redis_redis,commit.author.name,Real Name,313,90,s***s; F***e O***a (***); S***r K***v,Mask/Drop in public Gold
+redis_redis,commit.committer.name,Real Name,313,4,Y***n; G***b; d***n,Mask/Drop in public Gold
+redis_redis,commit.message (embedded emails),Embedded Email in text,132,47,m***s@g***.com; m***l@g***.com; r***d@a***.com,SHA-256 salted hash
+surrealdb_surrealdb,commit.author.email,Direct Email,414,24,D***n@u***.noreply.github.com; e***r@s***.com; 4***]@u***.noreply.github.com,SHA-256 salted hash
+surrealdb_surrealdb,commit.committer.email,Direct Email,414,4,r***e@s***.com; g***]@u***.noreply.github.com; n***y@g***.com,SHA-256 salted hash
+surrealdb_surrealdb,commit.author.name,Real Name,414,23,R***n B***r; S***i A***h Y*; E***e,Mask/Drop in public Gold
+surrealdb_surrealdb,commit.committer.name,Real Name,414,4,G***b; T***e M***n H***k; R***e M***i,Mask/Drop in public Gold
+surrealdb_surrealdb,commit.message (embedded emails),Embedded Email in text,77,14,O***o@u***.noreply.github.com; c***t@c***.com; e***r@s***.com,SHA-256 salted hash

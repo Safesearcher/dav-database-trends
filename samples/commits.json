@@ -1,0 +1,412 @@
+[
+  {
+    "sha": "18971ffba781a796c0ad3897bb4b82432c241e4c",
+    "node_id": "C_kwDOGgbgb9oAKDE4OTcxZmZiYTc4MWE3OTZjMGFkMzg5N2JiNGI4MjQzMmMyNDFlNGM",
+    "commit": {
+      "author": {
+        "name": "Pascal Sitter",
+        "email": "49523407+PSmouz@users.noreply.github.com",
+        "date": "2026-09-04T15:45:01Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "noreply@github.com",
+        "date": "2026-09-04T15:45:01Z"
+      },
+      "message": "Fix mem KV put after delete in same transaction (#7368)\n\nCo-authored-by: Rushmore Mushambi <rushmore@surrealdb.com>",
+      "tree": {
+        "sha": "ee48aafac1827270e1a18a521c69c277943ef7bb",
+        "url": "https://api.github.com/repos/surrealdb/surrealdb/git/trees/ee48aafac1827270e1a18a521c69c277943ef7bb"
+      },
+      "url": "https://api.github.com/repos/surrealdb/surrealdb/git/commits/18971ffba781a796c0ad3897bb4b82432c241e4c",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqmud9CRC1aQ7uu5UhlAAABYoQAFIwtr/oR1Z8VFmpAmtBup+p\nng/rU4TtW5/jVSCjl6N41ugbwKUjYhkZMBX8yIEuXUEqRnGTFTM1qh2L4JUHyKQY\nCniP0XQpx/YC6KDNo8W+Le3TQ6g2MsfYxTCk4tEEML+71O3uzPD5RTV9kMKF1FR5\nyRjHx3kZ2mPUlyStecB3suIsvAUbEkpZyKMblFPoLfF02tucg2ovaiI0go1trNM0\nWWws1W1pQSjeFu4yrC5F1o886RXyAaEQgcZxpsi/uWPc/gZDGuRSUrF/5qZQWl+G\nGTI0P6ixcF7lZ1cFBQu9977FuFaiLbZVi7lKb1bM9QIiWlWv0t15GRiVF9zP2qnU\nZktvHVfWVlstUW/JsxnFljQ8HRJQA6PPq5EjDS9idEwpO8WndjqjJXGS+QMyENbI\n3l2JquCNGI+Uc1Dsqt9jr2C3BO5IgHjxsDtVuWPauQUa2Xld2pwdeTobaA4125+T\nbQJbJYODu9XxhAkNE++zo/2YyI/pL481hTX+y/amfqf8bd/A/1L6Yxkh3hnguoME\nfJuzJhFyOg5Lg4PYUn6IXw+NIRm4XPJTaKYiZWJbH7rFhBaUOf6hsIMIpURPwp8I\nhWagiBX16U9+gdRJ7cT5m8gmqnNCi1PRyiAsVQoDZ1IjxN/eojCrkE2AymsuOgK1\nMkse2UgcTr1/cvVI6e2F\n=AP4p\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree ee48aafac1827270e1a18a521c69c277943ef7bb\nparent c7eac9022af90d2d9658a94e2dc51d45d9c6ff5b\nauthor Pascal Sitter <49523407+PSmouz@users.noreply.github.com> 1788536701 +0200\ncommitter GitHub <noreply@github.com> 1788536701 +0100\n\nFix mem KV put after delete in same transaction (#7368)\n\nCo-authored-by: Rushmore Mushambi <rushmore@surrealdb.com>",
+        "verified_at": "2026-09-04T15:45:01Z"
+      }
+    },
+    "url": "https://api.github.com/repos/surrealdb/surrealdb/commits/18971ffba781a796c0ad3897bb4b82432c241e4c",
+    "html_url": "https://github.com/surrealdb/surrealdb/commit/18971ffba781a796c0ad3897bb4b82432c241e4c",
+    "comments_url": "https://api.github.com/repos/surrealdb/surrealdb/commits/18971ffba781a796c0ad3897bb4b82432c241e4c/comments",
+    "author": {
+      "login": "PSmouz",
+      "id": 49523407,
+      "node_id": "MDQ6VXNlcjQ5NTIzNDA3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/49523407?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PSmouz",
+      "html_url": "https://github.com/PSmouz",
+      "followers_url": "https://api.github.com/users/PSmouz/followers",
+      "following_url": "https://api.github.com/users/PSmouz/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PSmouz/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PSmouz/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PSmouz/subscriptions",
+      "organizations_url": "https://api.github.com/users/PSmouz/orgs",
+      "repos_url": "https://api.github.com/users/PSmouz/repos",
+      "events_url": "https://api.github.com/users/PSmouz/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PSmouz/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "c7eac9022af90d2d9658a94e2dc51d45d9c6ff5b",
+        "url": "https://api.github.com/repos/surrealdb/surrealdb/commits/c7eac9022af90d2d9658a94e2dc51d45d9c6ff5b",
+        "html_url": "https://github.com/surrealdb/surrealdb/commit/c7eac9022af90d2d9658a94e2dc51d45d9c6ff5b"
+      }
+    ]
+  },
+  {
+    "sha": "c7eac9022af90d2d9658a94e2dc51d45d9c6ff5b",
+    "node_id": "C_kwDOGgbgb9oAKGM3ZWFjOTAyMmFmOTBkMmQ5NjU4YTk0ZTJkYzUxZDQ1ZDljNmZmNWI",
+    "commit": {
+      "author": {
+        "name": "Apika Luca",
+        "email": "bjqf0724@gmail.com",
+        "date": "2026-08-28T21:43:09Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "noreply@github.com",
+        "date": "2026-08-28T21:43:09Z"
+      },
+      "message": "Add `format` command on cli (#7479)\n\nCo-authored-by: Rushmore Mushambi <rushmore@surrealdb.com>",
+      "tree": {
+        "sha": "9e667ee74645afbfba42c593ee315e443fbbd0c4",
+        "url": "https://api.github.com/repos/surrealdb/surrealdb/git/trees/9e667ee74645afbfba42c593ee315e443fbbd0c4"
+      },
+      "url": "https://api.github.com/repos/surrealdb/surrealdb/git/commits/c7eac9022af90d2d9658a94e2dc51d45d9c6ff5b",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqkgDtCRC1aQ7uu5UhlAAAFfgQAG86BuDLFuY3xT6j/DdGcIxS\nRc/rTEZz9co+bDR1iC2ZaTaVY0cv9wnNfnzxxy6SB/HAtCLrM47tT0sXd/HgRq/a\nQV3K3Tyvm/i9OUr07D7Klu/TBU10SNUtts97vm6GPypFF5kjdEDoudXRC4V2VgWf\nKCqjodzEJDBYuJtvq05NBtspMt/DXKZQUi+jqVz7p2cSwHWbGrtYZSF4O0kGnNMV\nmmUrC7om/nbHCyw413LNZq7fg0F5viyVBYZZN3AhJusGYhCkTOWNsoiTriFvP4iR\n3evwh/lmWVZOfR2bOTmm8XzuL4hDM3PrVZ0BzFVBZ4gCYp554ksc51/yfTCyze2N\n49a+C3bJXz5vUXy18za3BBQpCBf1W0EdLH7KrEJUxbhNXZxUSjb3QKB5TRGPMphe\ncXhNa2qm3tsTI2uQr/XGdtfTm/m9nn7n2Jscn32L56Ehp2w8PYYfBWo1yNVqGccg\ns9INVtXc1L/HU0Zl/y5Dt95w+Lk1zX+cZoIhnTRkHfzAYm0dJM9M1Zq4Y5tXM7ln\n2vCHmryMl/59H/e6MXkb0DlfyvLBShx3/eP5M4p+aa6JJHe/BjPW7+3/uYq9vnSV\n5ORI7xCi85fQYWxpihXw0QabmmGC25VglJNTf/MOG6rYZyMhPoSymuxu5tGoKlan\nsxOi9tCdb7KemFyhX9BP\n=4oPi\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 9e667ee74645afbfba42c593ee315e443fbbd0c4\nparent 1a2ebca5709c1a06695f1fc427f01adc35d98cb5\nauthor Apika Luca <bjqf0724@gmail.com> 1787953389 -0700\ncommitter GitHub <noreply@github.com> 1787953389 +0100\n\nAdd `format` command on cli (#7479)\n\nCo-authored-by: Rushmore Mushambi <rushmore@surrealdb.com>",
+        "verified_at": "2026-08-28T21:43:10Z"
+      }
+    },
+    "url": "https://api.github.com/repos/surrealdb/surrealdb/commits/c7eac9022af90d2d9658a94e2dc51d45d9c6ff5b",
+    "html_url": "https://github.com/surrealdb/surrealdb/commit/c7eac9022af90d2d9658a94e2dc51d45d9c6ff5b",
+    "comments_url": "https://api.github.com/repos/surrealdb/surrealdb/commits/c7eac9022af90d2d9658a94e2dc51d45d9c6ff5b/comments",
+    "author": {
+      "login": "Brayan-724",
+      "id": 70247585,
+      "node_id": "MDQ6VXNlcjcwMjQ3NTg1",
+      "avatar_url": "https://avatars.githubusercontent.com/u/70247585?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/Brayan-724",
+      "html_url": "https://github.com/Brayan-724",
+      "followers_url": "https://api.github.com/users/Brayan-724/followers",
+      "following_url": "https://api.github.com/users/Brayan-724/following{/other_user}",
+      "gists_url": "https://api.github.com/users/Brayan-724/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/Brayan-724/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/Brayan-724/subscriptions",
+      "organizations_url": "https://api.github.com/users/Brayan-724/orgs",
+      "repos_url": "https://api.github.com/users/Brayan-724/repos",
+      "events_url": "https://api.github.com/users/Brayan-724/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/Brayan-724/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "1a2ebca5709c1a06695f1fc427f01adc35d98cb5",
+        "url": "https://api.github.com/repos/surrealdb/surrealdb/commits/1a2ebca5709c1a06695f1fc427f01adc35d98cb5",
+        "html_url": "https://github.com/surrealdb/surrealdb/commit/1a2ebca5709c1a06695f1fc427f01adc35d98cb5"
+      }
+    ]
+  },
+  {
+    "sha": "1a2ebca5709c1a06695f1fc427f01adc35d98cb5",
+    "node_id": "C_kwDOGgbgb9oAKDFhMmViY2E1NzA5YzFhMDY2OTVmMWZjNDI3ZjAxYWRjMzVkOThjYjU",
+    "commit": {
+      "author": {
+        "name": "Rushmore Mushambi",
+        "email": "rushmore@surrealdb.com",
+        "date": "2026-08-28T20:24:22Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "noreply@github.com",
+        "date": "2026-08-28T20:24:22Z"
+      },
+      "message": "Commit Cargo.lock for the SDK build-test crates (#7489)",
+      "tree": {
+        "sha": "dce7ad50dd95490c37ea4d870d617b7a98826cb5",
+        "url": "https://api.github.com/repos/surrealdb/surrealdb/git/trees/dce7ad50dd95490c37ea4d870d617b7a98826cb5"
+      },
+      "url": "https://api.github.com/repos/surrealdb/surrealdb/git/commits/1a2ebca5709c1a06695f1fc427f01adc35d98cb5",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqke52CRC1aQ7uu5UhlAAAjB0QAJjN4DMY14/xGgt0r1svzSZL\nZhVaAy+4zhxGUEIcpyX3eUiKRe4gRc6TgdxouNMFWr2IYHvMRdnvhjDtaQ+GdnLP\nV1Wdi4xEcuFUB8TpOnnMfbrwNQJDcZLpgs7WsQ4dE520bGHQEt9NX0bHEcXyBpuc\nNPbR4F4Ys6GAMtroF7w4vWlRCdjYU0VNKACUrUV1q0ARP+4Qxt5y95l0eb62bjjB\nP/oBt+JVvWMoSGWx9KSid7NduFq2Mqj1s7Q2FXohiWgJw83evd+/CHuMqQzHP9lc\nVe5wX3JnK2mD1dUK1qJKSWgfJTD4KCo0jGkBaEuS5RCqzlZLL8/uwuH48jD3VyQ7\nmiyjq8zx2OhBqnL6aiKqYN31+Rx8ViarIXFsni6QP5/KsstF7uKMZUltNkAFGgdg\n0bf2t98qx/gtF7DFl67nA41aPfFlt/yOWXNqkuu6bR2eZIdu9AuxRJBPbzhplFB2\nxHlZY/BY0L6RSniJXSsH4EFoy/T1DeeXU1SbOwvI0dMc1OxxZANlqua9ON5x5+21\nhuRl7MOa7J2Fg6qhcrt75L75Una4RCXpOa6ONxNUT8nScPuzJkc/sC8BImymV3vq\nv10lIOesTFPNmPI14iv/3+4qv4T2K3nY16cdu/i0MQzpy7BVmbiUEMQSfbgSwR6n\nWWdwkUD/Oq3Yy2MJ820d\n=orI0\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree dce7ad50dd95490c37ea4d870d617b7a98826cb5\nparent 9d9a5b0693e499e0d030cac6b618062ec02cd2bc\nauthor Rushmore Mushambi <rushmore@surrealdb.com> 1787948662 +0100\ncommitter GitHub <noreply@github.com> 1787948662 +0100\n\nCommit Cargo.lock for the SDK build-test crates (#7489)",
+        "verified_at": "2026-08-28T20:24:22Z"
+      }
+    },
+    "url": "https://api.github.com/repos/surrealdb/surrealdb/commits/1a2ebca5709c1a06695f1fc427f01adc35d98cb5",
+    "html_url": "https://github.com/surrealdb/surrealdb/commit/1a2ebca5709c1a06695f1fc427f01adc35d98cb5",
+    "comments_url": "https://api.github.com/repos/surrealdb/surrealdb/commits/1a2ebca5709c1a06695f1fc427f01adc35d98cb5/comments",
+    "author": {
+      "login": "rushmorem",
+      "id": 4958190,
+      "node_id": "MDQ6VXNlcjQ5NTgxOTA=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/4958190?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/rushmorem",
+      "html_url": "https://github.com/rushmorem",
+      "followers_url": "https://api.github.com/users/rushmorem/followers",
+      "following_url": "https://api.github.com/users/rushmorem/following{/other_user}",
+      "gists_url": "https://api.github.com/users/rushmorem/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/rushmorem/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/rushmorem/subscriptions",
+      "organizations_url": "https://api.github.com/users/rushmorem/orgs",
+      "repos_url": "https://api.github.com/users/rushmorem/repos",
+      "events_url": "https://api.github.com/users/rushmorem/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/rushmorem/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "9d9a5b0693e499e0d030cac6b618062ec02cd2bc",
+        "url": "https://api.github.com/repos/surrealdb/surrealdb/commits/9d9a5b0693e499e0d030cac6b618062ec02cd2bc",
+        "html_url": "https://github.com/surrealdb/surrealdb/commit/9d9a5b0693e499e0d030cac6b618062ec02cd2bc"
+      }
+    ]
+  },
+  {
+    "sha": "9d9a5b0693e499e0d030cac6b618062ec02cd2bc",
+    "node_id": "C_kwDOGgbgb9oAKDlkOWE1YjA2OTNlNDk5ZTBkMDMwY2FjNmI2MTgwNjJlYzAyY2QyYmM",
+    "commit": {
+      "author": {
+        "name": "Tobie Morgan Hitchcock",
+        "email": "tobie@surrealdb.com",
+        "date": "2026-07-02T06:28:03Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "noreply@github.com",
+        "date": "2026-07-02T06:28:03Z"
+      },
+      "message": "chore(deps): bump revision to 0.30.0 (#534)",
+      "tree": {
+        "sha": "807703c18b4dd5d722f4c9e06fd763ebfe1c3efa",
+        "url": "https://api.github.com/repos/surrealdb/surrealdb/git/trees/807703c18b4dd5d722f4c9e06fd763ebfe1c3efa"
+      },
+      "url": "https://api.github.com/repos/surrealdb/surrealdb/git/commits/9d9a5b0693e499e0d030cac6b618062ec02cd2bc",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqRgTzCRC1aQ7uu5UhlAAA5IsQAEf3IuELfuZgqPwtoyXo1uul\n0NTE9TDPrWZPt8EPX2Z30gatWvfMecvOzICSHmimEmbxQD7Mqd2u2FxsEdAhqVYS\nnRGxPj1LEOR6oK/b7QODvVpp5sYh6eQCHDAS2Xo3rvWYIEwH/JrToUHS8lV035zK\nGY4BSBAJeO5S+Q3mgRogLD3OXxeuaJAOllor+YYoFesmmPh6UzeFaf94F4DDvzrV\nUcmSL7DZBIV0tqPWX1IxdIwKtv3tYNWtLPxAp+RFBWiy1L5p5oFaS10ZUiuHlQRB\nVz9vgGXtERGwFLLRDYDFKHTeelHaXs9e31QHW3xAUYWDbu/UQULyLxFwGWp6QtPK\ngplGrhf5rqleg9+A5Ml4H6Gsqa4SUjoUjKpDjLTRHGl0/4Q8HRXJu5wyj1kPZXW1\nJf/ndkEyNSg/zmCFVvieEt8SDQekhQGPhfvQ7NR33vMbdaEVO/dEGAsSxuGIY3EO\nbjwUwo96Hy0hMCbG2MwIV2+CeXyxgWFTWr007+OuDyMHVw+Xzyztu4j/fYe3rRO5\n7gz75nfkok4dXbt+Vd9I7mLxS22qgAii8jdrMsHiRK2P0ioDBzTtI2gD3u+uDTDx\nJ+W4ROAacWyUW5qLCliBNfaGjKmiY2SX+DyqNjDW8M8JGSlEer/v+LMvCYmYCfhu\nKEKvhZJFBcGvPbxgtC4F\n=2BFj\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 807703c18b4dd5d722f4c9e06fd763ebfe1c3efa\nparent b2a2e492a800beef2e2d5dceea12d237c3479ac0\nauthor Tobie Morgan Hitchcock <tobie@surrealdb.com> 1782973683 -0700\ncommitter GitHub <noreply@github.com> 1782973683 +0100\n\nchore(deps): bump revision to 0.30.0 (#534)",
+        "verified_at": "2026-07-06T15:53:49Z"
+      }
+    },
+    "url": "https://api.github.com/repos/surrealdb/surrealdb/commits/9d9a5b0693e499e0d030cac6b618062ec02cd2bc",
+    "html_url": "https://github.com/surrealdb/surrealdb/commit/9d9a5b0693e499e0d030cac6b618062ec02cd2bc",
+    "comments_url": "https://api.github.com/repos/surrealdb/surrealdb/commits/9d9a5b0693e499e0d030cac6b618062ec02cd2bc/comments",
+    "author": {
+      "login": "tobiemh",
+      "id": 1588290,
+      "node_id": "MDQ6VXNlcjE1ODgyOTA=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1588290?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/tobiemh",
+      "html_url": "https://github.com/tobiemh",
+      "followers_url": "https://api.github.com/users/tobiemh/followers",
+      "following_url": "https://api.github.com/users/tobiemh/following{/other_user}",
+      "gists_url": "https://api.github.com/users/tobiemh/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/tobiemh/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/tobiemh/subscriptions",
+      "organizations_url": "https://api.github.com/users/tobiemh/orgs",
+      "repos_url": "https://api.github.com/users/tobiemh/repos",
+      "events_url": "https://api.github.com/users/tobiemh/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/tobiemh/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "b2a2e492a800beef2e2d5dceea12d237c3479ac0",
+        "url": "https://api.github.com/repos/surrealdb/surrealdb/commits/b2a2e492a800beef2e2d5dceea12d237c3479ac0",
+        "html_url": "https://github.com/surrealdb/surrealdb/commit/b2a2e492a800beef2e2d5dceea12d237c3479ac0"
+      }
+    ]
+  },
+  {
+    "sha": "b2a2e492a800beef2e2d5dceea12d237c3479ac0",
+    "node_id": "C_kwDOGgbgb9oAKGIyYTJlNDkyYTgwMGJlZWYyZTJkNWRjZWVhMTJkMjM3YzM0NzlhYzA",
+    "commit": {
+      "author": {
+        "name": "Tobie Morgan Hitchcock",
+        "email": "tobie@surrealdb.com",
+        "date": "2026-07-02T00:46:49Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "noreply@github.com",
+        "date": "2026-07-02T00:46:49Z"
+      },
+      "message": "feat(exec): push graph traversal WHERE filters into GraphEdgeScan (#533)",
+      "tree": {
+        "sha": "c3b1991270af532d8ee7ac311ebdfb25ecaf38c7",
+        "url": "https://api.github.com/repos/surrealdb/surrealdb/git/trees/c3b1991270af532d8ee7ac311ebdfb25ecaf38c7"
+      },
+      "url": "https://api.github.com/repos/surrealdb/surrealdb/git/commits/b2a2e492a800beef2e2d5dceea12d237c3479ac0",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqRbT5CRC1aQ7uu5UhlAAAD14QAKjVBJYFhEIndhwxqKdurfkZ\nPwsQkfUfKM1/nWyXCeYNF0Lm0adRNaPfPbOzzNcWRXC1gLdF1EnujJY5jFhxx82Q\nVa1BIpfAj4xC72+4J8kRueRhv95kprv+BGcZMc3xpzjtI41/9LIfHV+uuM4yMLSt\njDLFkRtinZv7jpPyMIygfxQNlSxLEbOGacc0UxkIpfAS1b8doDPhT63ptUL63X0y\n43Mx0cj+AAxu8r9NpZrK/W3F8yPg/xldwaxcMEye9h0HnYwf7YwEuY+XrbsTSGKp\nY5cuftoZQumBL9+3IZGe80EjKJib+C17rxicLA69gsoVTSMPOV0CDJnClEfa2IfO\nwH0UOTpsA6xQolQf5LFscF+KcsaCvtl0z4iwpIA74iGAJcN4dbEqe845isAmROKQ\nkMqP4KIOBsIzIw4V0OAvMkcqwuLJXqa+nf6qpeYYCAVzraoE87g/Y/nETzqvCXew\nc++rZoCmSgACrGILookivZkycAtLa3S6iysY31E1LnTa96G7hwOqkedt3xpzxmuB\nUNsopWZ9xVThU8uI76T3/b9Vk73aCgYJrTlTajFTF0v6avRp/uKkJ4ZKlQWoJHgb\nCuf+BHXNoCS5Jr8vGKYcY13F7RR+6XalLtxGHLqjnlWhlQMFlNNn28thpTYd5+6s\nRigo1pK0GWvpBuFX/S0m\n=dA6Y\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree c3b1991270af532d8ee7ac311ebdfb25ecaf38c7\nparent ab8ce649ff39f32f7d2da8b66548220c2afa8986\nauthor Tobie Morgan Hitchcock <tobie@surrealdb.com> 1782953209 -0700\ncommitter GitHub <noreply@github.com> 1782953209 +0100\n\nfeat(exec): push graph traversal WHERE filters into GraphEdgeScan (#533)",
+        "verified_at": "2026-07-06T15:53:49Z"
+      }
+    },
+    "url": "https://api.github.com/repos/surrealdb/surrealdb/commits/b2a2e492a800beef2e2d5dceea12d237c3479ac0",
+    "html_url": "https://github.com/surrealdb/surrealdb/commit/b2a2e492a800beef2e2d5dceea12d237c3479ac0",
+    "comments_url": "https://api.github.com/repos/surrealdb/surrealdb/commits/b2a2e492a800beef2e2d5dceea12d237c3479ac0/comments",
+    "author": {
+      "login": "tobiemh",
+      "id": 1588290,
+      "node_id": "MDQ6VXNlcjE1ODgyOTA=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1588290?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/tobiemh",
+      "html_url": "https://github.com/tobiemh",
+      "followers_url": "https://api.github.com/users/tobiemh/followers",
+      "following_url": "https://api.github.com/users/tobiemh/following{/other_user}",
+      "gists_url": "https://api.github.com/users/tobiemh/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/tobiemh/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/tobiemh/subscriptions",
+      "organizations_url": "https://api.github.com/users/tobiemh/orgs",
+      "repos_url": "https://api.github.com/users/tobiemh/repos",
+      "events_url": "https://api.github.com/users/tobiemh/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/tobiemh/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "ab8ce649ff39f32f7d2da8b66548220c2afa8986",
+        "url": "https://api.github.com/repos/surrealdb/surrealdb/commits/ab8ce649ff39f32f7d2da8b66548220c2afa8986",
+        "html_url": "https://github.com/surrealdb/surrealdb/commit/ab8ce649ff39f32f7d2da8b66548220c2afa8986"
+      }
+    ]
+  }
+]

@@ -1,0 +1,11 @@
+repo,total_issues_file,prs_in_issues_count,true_issues_count,total_pulls_file,pr_overlap_count,overlap_pct_of_issue_prs,overlap_pct_of_pulls,status
+apache_cassandra,1130,1130,0,527,527,46.64,100.0,WARN (100% of issues file are PRs; zero true issues)
+chroma-core_chroma,1141,988,153,887,887,89.78,100.0,WARN (988 PRs embedded in issues.json; requires Silver filter)
+cockroachdb_cockroach,13978,3839,10139,2292,2292,59.7,100.0,WARN (3839 PRs embedded in issues.json; requires Silver filter)
+facebookresearch_faiss,753,646,107,583,583,90.25,100.0,WARN (646 PRs embedded in issues.json; requires Silver filter)
+milvus-io_milvus,5964,3744,2220,3484,3484,93.06,100.0,WARN (3744 PRs embedded in issues.json; requires Silver filter)
+mongodb_mongo,218,218,0,189,189,86.7,100.0,WARN (100% of issues file are PRs; zero true issues)
+postgres_postgres,0,0,0,0,0,0.0,0.0,SKIPPED (No issues dataset)
+qdrant_qdrant,2678,2239,439,1892,1892,84.5,100.0,WARN (2239 PRs embedded in issues.json; requires Silver filter)
+redis_redis,1110,877,233,704,704,80.27,100.0,WARN (877 PRs embedded in issues.json; requires Silver filter)
+surrealdb_surrealdb,891,201,690,123,123,61.19,100.0,WARN (201 PRs embedded in issues.json; requires Silver filter)

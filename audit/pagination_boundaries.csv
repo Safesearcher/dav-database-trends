@@ -1,0 +1,7 @@
+repo,entity,page,boundary_window,repeated_ids_count,date_monotonic_descending,status
+chroma-core_chroma,issues,6,[495..505],0,True,PASS (Clean boundary)
+chroma-core_chroma,pulls,6,[495..505],0,True,PASS (Clean boundary)
+chroma-core_chroma,issues,9,[795..805],0,True,PASS (Clean boundary)
+chroma-core_chroma,pulls,9,[795..805],0,True,PASS (Clean boundary)
+milvus-io_milvus,issues,15,[1395..1405],0,True,PASS (Clean boundary)
+milvus-io_milvus,pulls,15,[1395..1405],0,True,PASS (Clean boundary)

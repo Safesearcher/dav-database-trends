@@ -1,0 +1,11 @@
+repo,total_commits,invalid_dates_commits,future_dates_commits,pre_repo_commits,empty_commit_messages,total_issues,invalid_dates_issues,future_dates_issues,closed_before_created_issues,empty_issue_titles,total_pulls,invalid_dates_pulls,future_dates_pulls,closed_before_created_pulls,merged_before_created_pulls,empty_pull_titles,hard_failures_count,status
+apache_cassandra,696,0,0,0,0,1130,0,0,0,0,527,0,0,0,0,0,0,PASS
+chroma-core_chroma,418,0,0,0,0,1141,0,0,0,0,887,0,0,0,0,0,0,PASS
+cockroachdb_cockroach,2492,0,0,0,0,13978,0,0,0,0,2292,0,0,0,0,0,0,PASS
+facebookresearch_faiss,461,0,0,0,0,753,0,0,0,0,583,0,0,0,0,0,0,PASS
+milvus-io_milvus,1364,0,0,0,0,5964,0,0,0,0,3484,0,0,0,0,0,0,PASS
+mongodb_mongo,5839,0,0,0,0,218,0,0,0,0,189,0,0,0,0,0,0,PASS
+postgres_postgres,1674,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,PASS
+qdrant_qdrant,1271,0,0,0,0,2678,0,0,0,0,1892,0,0,0,0,0,0,PASS
+redis_redis,313,0,0,0,0,1110,0,0,0,0,704,0,0,0,0,0,0,PASS
+surrealdb_surrealdb,414,0,0,0,0,891,0,0,0,0,123,0,0,0,0,0,0,PASS

@@ -1,0 +1,51 @@
+repo,entity,file_path,exists,size_bytes,is_valid_json,top_level_type,expected_type,record_count,expected_load_count,matches_load_summary,status
+apache_cassandra,repo_metadata,bronze/apache_cassandra/repo_metadata.json,True,7188,True,dict,dict,1,1,True,PASS
+apache_cassandra,commits,bronze/apache_cassandra/commits.json,True,3431553,True,list,list,696,696,True,PASS
+apache_cassandra,issues,bronze/apache_cassandra/issues.json,True,5108577,True,list,list,1130,1130,True,PASS
+apache_cassandra,pulls,bronze/apache_cassandra/pulls.json,True,10764792,True,list,list,527,527,True,PASS
+apache_cassandra,releases,bronze/apache_cassandra/releases.json,True,2,True,list,list,0,0,True,PASS (No GitHub releases published)
+chroma-core_chroma,repo_metadata,bronze/chroma-core_chroma/repo_metadata.json,True,7253,True,dict,dict,1,1,True,PASS
+chroma-core_chroma,commits,bronze/chroma-core_chroma/commits.json,True,3132625,True,list,list,418,418,True,PASS
+chroma-core_chroma,issues,bronze/chroma-core_chroma/issues.json,True,6257258,True,list,list,1141,1141,True,PASS
+chroma-core_chroma,pulls,bronze/chroma-core_chroma/pulls.json,True,18644249,True,list,list,887,887,True,PASS
+chroma-core_chroma,releases,bronze/chroma-core_chroma/releases.json,True,991531,True,list,list,137,137,True,PASS
+cockroachdb_cockroach,repo_metadata,bronze/cockroachdb_cockroach/repo_metadata.json,True,7520,True,dict,dict,1,1,True,PASS
+cockroachdb_cockroach,commits,bronze/cockroachdb_cockroach/commits.json,True,13387509,True,list,list,2492,2492,True,PASS
+cockroachdb_cockroach,issues,bronze/cockroachdb_cockroach/issues.json,True,144556510,True,list,list,13978,13978,True,PASS
+cockroachdb_cockroach,pulls,bronze/cockroachdb_cockroach/pulls.json,True,47790895,True,list,list,2292,2292,True,PASS
+cockroachdb_cockroach,releases,bronze/cockroachdb_cockroach/releases.json,True,2,True,list,list,0,0,True,PASS (No GitHub releases published)
+facebookresearch_faiss,repo_metadata,bronze/facebookresearch_faiss/repo_metadata.json,True,7519,True,dict,dict,1,1,True,PASS
+facebookresearch_faiss,commits,bronze/facebookresearch_faiss/commits.json,True,2606854,True,list,list,461,461,True,PASS
+facebookresearch_faiss,issues,bronze/facebookresearch_faiss/issues.json,True,5240811,True,list,list,753,753,True,PASS
+facebookresearch_faiss,pulls,bronze/facebookresearch_faiss/pulls.json,True,12945336,True,list,list,583,583,True,PASS
+facebookresearch_faiss,releases,bronze/facebookresearch_faiss/releases.json,True,167334,True,list,list,29,29,True,PASS
+milvus-io_milvus,repo_metadata,bronze/milvus-io_milvus/repo_metadata.json,True,7505,True,dict,dict,1,1,True,PASS
+milvus-io_milvus,commits,bronze/milvus-io_milvus/commits.json,True,11440531,True,list,list,1364,1364,True,PASS
+milvus-io_milvus,issues,bronze/milvus-io_milvus/issues.json,True,63700635,True,list,list,5964,5964,True,PASS
+milvus-io_milvus,pulls,bronze/milvus-io_milvus/pulls.json,True,97657389,True,list,list,3484,3484,True,PASS
+milvus-io_milvus,releases,bronze/milvus-io_milvus/releases.json,True,1861102,True,list,list,176,176,True,PASS
+mongodb_mongo,repo_metadata,bronze/mongodb_mongo/repo_metadata.json,True,6982,True,dict,dict,1,1,True,PASS
+mongodb_mongo,commits,bronze/mongodb_mongo/commits.json,True,17622809,True,list,list,5839,5839,True,PASS
+mongodb_mongo,issues,bronze/mongodb_mongo/issues.json,True,1086638,True,list,list,218,218,True,PASS
+mongodb_mongo,pulls,bronze/mongodb_mongo/pulls.json,True,2656219,True,list,list,189,189,True,PASS
+mongodb_mongo,releases,bronze/mongodb_mongo/releases.json,True,2,True,list,list,0,0,True,PASS (No GitHub releases published)
+postgres_postgres,repo_metadata,bronze/postgres_postgres/repo_metadata.json,True,7209,True,dict,dict,1,1,True,PASS
+postgres_postgres,commits,bronze/postgres_postgres/commits.json,True,7971031,True,list,list,1674,1674,True,PASS
+postgres_postgres,issues,bronze/postgres_postgres/issues.json,True,2,True,list,list,0,0,True,WARN (Empty dataset)
+postgres_postgres,pulls,bronze/postgres_postgres/pulls.json,True,2,True,list,list,0,0,True,WARN (Empty dataset)
+postgres_postgres,releases,bronze/postgres_postgres/releases.json,True,2,True,list,list,0,0,True,PASS (No GitHub releases published)
+qdrant_qdrant,repo_metadata,bronze/qdrant_qdrant/repo_metadata.json,True,7468,True,dict,dict,1,1,True,PASS
+qdrant_qdrant,commits,bronze/qdrant_qdrant/commits.json,True,8764966,True,list,list,1271,1271,True,PASS
+qdrant_qdrant,issues,bronze/qdrant_qdrant/issues.json,True,17854775,True,list,list,2678,2678,True,PASS
+qdrant_qdrant,pulls,bronze/qdrant_qdrant/pulls.json,True,43024070,True,list,list,1892,1892,True,PASS
+qdrant_qdrant,releases,bronze/qdrant_qdrant/releases.json,True,1480410,True,list,list,117,117,True,PASS
+redis_redis,repo_metadata,bronze/redis_redis/repo_metadata.json,True,7248,True,dict,dict,1,1,True,PASS
+redis_redis,commits,bronze/redis_redis/commits.json,True,2476772,True,list,list,313,313,True,PASS
+redis_redis,issues,bronze/redis_redis/issues.json,True,7624789,True,list,list,1110,1110,True,PASS
+redis_redis,pulls,bronze/redis_redis/pulls.json,True,15883600,True,list,list,704,704,True,PASS
+redis_redis,releases,bronze/redis_redis/releases.json,True,629961,True,list,list,155,155,True,PASS
+surrealdb_surrealdb,repo_metadata,bronze/surrealdb_surrealdb/repo_metadata.json,True,7566,True,dict,dict,1,1,True,PASS
+surrealdb_surrealdb,commits,bronze/surrealdb_surrealdb/commits.json,True,2132608,True,list,list,414,414,True,PASS
+surrealdb_surrealdb,issues,bronze/surrealdb_surrealdb/issues.json,True,6468526,True,list,list,891,891,True,PASS
+surrealdb_surrealdb,pulls,bronze/surrealdb_surrealdb/pulls.json,True,2876197,True,list,list,123,123,True,PASS
+surrealdb_surrealdb,releases,bronze/surrealdb_surrealdb/releases.json,True,2245740,True,list,list,150,150,True,PASS

@@ -1,0 +1,11 @@
+repo,commits_total,commit_bots_count,commit_bots_pct,commit_unlinked_authors_count,commit_unlinked_authors_pct,pulls_total,pull_bots_count,pull_bots_pct,pull_ghost_users_count,pull_ghost_users_pct,top_commit_author_1,top_commit_author_1_count,top_pr_author_1,top_pr_author_1_count
+apache_cassandra,696,0,0.0,20,2.87,527,0,0.0,0,0.0,smiklosovic,176,netudima,45
+chroma-core_chroma,418,7,1.67,6,1.44,887,8,0.9,0,0.0,rescrv,130,rescrv,168
+cockroachdb_cockroach,2492,1033,41.45,14,0.56,2292,301,13.13,0,0.0,trunk-io[bot],995,cockroach-teamcity,174
+facebookresearch_faiss,461,0,0.0,140,30.37,583,4,0.69,0,0.0,Michael Norris (unlinked),79,mnorris11,91
+milvus-io_milvus,1364,2,0.15,0,0.0,3484,6,0.17,0,0.0,xiaofan-luan,132,congqixia,232
+mongodb_mongo,5839,404,6.92,1,0.02,189,0,0.0,0,0.0,auto-revert-app[bot],142,meharsg96,172
+postgres_postgres,1674,0,0.0,130,7.77,0,0,0.0,0,0.0,michaelpq,209,None,0
+qdrant_qdrant,1271,219,17.23,4,0.31,1892,269,14.22,1,0.05,generall,260,generall,337
+redis_redis,313,3,0.96,0,0.0,704,17,2.41,0,0.0,vitahlin,44,vitahlin,58
+surrealdb_surrealdb,414,18,4.35,0,0.0,123,5,4.07,0,0.0,ssttuu,137,tobiemh,10
