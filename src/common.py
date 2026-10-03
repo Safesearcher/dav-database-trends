@@ -13,6 +13,7 @@ Includes:
 """
 
 import os
+import re
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -25,12 +26,10 @@ try:
         TimestampType,
         LongType,
     )
-    from delta.tables import DeltaTable
 except ImportError:
     # Stubs for local testing outside Databricks
     DataFrame = object
     SparkSession = object
-    DeltaTable = object
 
     class _FStub:
         def __getattr__(self, name):
@@ -40,6 +39,11 @@ except ImportError:
     StringType = object
     TimestampType = object
     LongType = object
+
+try:
+    from delta.tables import DeltaTable
+except ImportError:
+    DeltaTable = object
 
 
 # Known CI/CD bot accounts from progress.md section 4.3
@@ -53,6 +57,15 @@ KNOWN_BOT_ACCOUNTS = [
 ]
 
 VALID_RUN_MODES = {"incremental", "backfill", "full"}
+EMPTY_ALLOWED = {"since", "until"}
+
+DATE_COLUMN_MAP = {
+    "commits": "commit.committer.date",
+    "issues": "updated_at",
+    "pulls": "updated_at",
+    "releases": "published_at",
+    "repo_metadata": "updated_at",
+}
 
 
 # -----------------------------------------------------------------------------
@@ -61,24 +74,18 @@ VALID_RUN_MODES = {"incremental", "backfill", "full"}
 
 def get_params(dbutils=None) -> dict:
     """
-    Reads notebook widgets with safe defaults:
-    - repo: repository identifier (default: "surrealdb/surrealdb")
-    - entity: entity name (default: "commits")
-    - base_path: raw storage base volume path (default: "/Volumes/workspace/bronze/raw_json")
-    - since: ISO-8601 start timestamp (default: "2026-04-01T00:00:00Z")
-    - until: ISO-8601 end timestamp (default: "2026-10-01T00:00:00Z")
-    - batch_id: batch execution identifier (default: auto-generated timestamped string)
-    - run_mode: execution mode in {'incremental', 'backfill', 'full'} (default: 'full')
-    - catalog: Unity Catalog name (default: 'workspace')
+    Reads notebook widgets with safe defaults.
+    Default base_path: /Volumes/workspace/bronze_data/raw.
+    Empty values are preserved for since/until to allow unbounded windows.
     """
     default_batch = datetime.now(timezone.utc).strftime("batch_%Y%m%d_%H%M%S")
     defaults = {
         "catalog": "workspace",
         "repo": "surrealdb/surrealdb",
         "entity": "commits",
-        "base_path": "/Volumes/workspace/bronze/raw_json",
-        "since": "2026-04-01T00:00:00Z",
-        "until": "2026-10-01T00:00:00Z",
+        "base_path": "/Volumes/workspace/bronze_data/raw",
+        "since": "",
+        "until": "",
         "batch_id": default_batch,
         "run_mode": "full",
         "salt": "",
@@ -89,21 +96,32 @@ def get_params(dbutils=None) -> dict:
 
     params = {}
     for key, default_val in defaults.items():
+        val = None
         try:
-            if key == "run_mode":
-                dbutils.widgets.dropdown("run_mode", default_val, ["full", "incremental", "backfill"], "Execution Run Mode")
-            else:
-                dbutils.widgets.text(key, str(default_val), f"Parameter: {key}")
             val = dbutils.widgets.get(key)
-            params[key] = val.strip() if val else default_val
         except Exception:
+            try:
+                if key == "run_mode":
+                    dbutils.widgets.dropdown(key, default_val, ["full", "incremental", "backfill"], "Execution Run Mode")
+                else:
+                    dbutils.widgets.text(key, str(default_val), f"Parameter: {key}")
+                val = dbutils.widgets.get(key)
+            except Exception:
+                val = None
+        if val is None:
             params[key] = default_val
+        elif key in EMPTY_ALLOWED:
+            params[key] = str(val).strip()
+        else:
+            params[key] = str(val).strip() or default_val
 
-    # Validate and normalize run_mode
     if params["run_mode"].lower() not in VALID_RUN_MODES:
         params["run_mode"] = "full"
     else:
         params["run_mode"] = params["run_mode"].lower()
+
+    if params["batch_id"] in (None, ""):
+        params["batch_id"] = default_batch
 
     return params
 
@@ -113,26 +131,29 @@ def get_params(dbutils=None) -> dict:
 # -----------------------------------------------------------------------------
 
 def get_salt(dbutils=None, scope: str = "dbtrends", key: str = "salt", widget_name: str = "salt") -> str:
-    """
-    Reads salt from dbutils.secrets scope 'dbtrends' key 'salt', falling back to widget 'salt'.
-    Never commits salt to disk or repository.
-    """
+    """Resolve salt from dbutils secrets, widget fallback, then environment variable."""
     if dbutils is not None:
         try:
             val = dbutils.secrets.get(scope=scope, key=key)
-            if val and val.strip():
-                return val.strip()
+            if val and str(val).strip():
+                return str(val).strip()
         except Exception:
             pass
 
         try:
             val = dbutils.widgets.get(widget_name)
-            if val and val.strip():
-                return val.strip()
+            if val and str(val).strip():
+                return str(val).strip()
         except Exception:
             pass
 
-    return os.environ.get("SALT", "default_salt_for_local_testing_only")
+    env_val = os.environ.get("SALT")
+    if env_val and str(env_val).strip():
+        return str(env_val).strip()
+
+    raise ValueError(
+        "No salt configured. Set dbutils.secrets.get('dbtrends', 'salt'), add widget 'salt', or export SALT."
+    )
 
 
 def hash_email(col, salt: str):
@@ -153,13 +174,15 @@ def hash_email(col, salt: str):
 
 def bot_flag(login_col, type_col=None):
     """
-    Implements bot classification rules from progress.md section 4.3:
-    1. author_login LIKE '%[bot]%'
+    Flags bot accounts using:
+    1. login contains '[bot]'
     2. user.type = 'Bot'
-    3. author_login IN ('bors', 'cockroach-teamcity', 'dependabot', 'mongodb-evergreen', 'renovate', 'github-actions')
+    3. known accounts in KNOWN_BOT_ACCOUNTS
+    4. login ends with '-bot' or '_bot' or 'bot' as final token
     """
     login = F.lower(F.coalesce(F.col(login_col) if isinstance(login_col, str) else login_col, F.lit("")))
     cond = login.like("%[bot]%") | login.isin([b.lower() for b in KNOWN_BOT_ACCOUNTS])
+    cond = cond | login.rlike(r"(?i)(^|[-_])bot$")
 
     if type_col is not None:
         t_col = F.lower(F.coalesce(F.col(type_col) if isinstance(type_col, str) else type_col, F.lit("")))
@@ -271,14 +294,16 @@ def end_run(
     catalog: str = "workspace",
 ):
     """Writes execution audit metrics into Delta table <catalog>.ops.pipeline_execution_logs."""
+    from src.schemas import PIPELINE_EXECUTION_LOGS_SCHEMA
+
     table_name = f"{catalog}.ops.pipeline_execution_logs"
     now_ts = datetime.now(timezone.utc)
 
     log_row = [(
         log_id,
         layer,
-        parameter,
-        batch_id,
+        parameter if parameter is not None else None,
+        batch_id if batch_id is not None else None,
         start_time,
         end_time,
         status,
@@ -288,23 +313,7 @@ def end_run(
         now_ts,
     )]
 
-    # Dynamic schema definition for the execution logs row
-    from pyspark.sql.types import StructType, StructField
-    logs_schema = StructType([
-        StructField("log_id", StringType(), False),
-        StructField("layer", StringType(), False),
-        StructField("parameter", StringType(), False),
-        StructField("batch_id", StringType(), False),
-        StructField("start_time", TimestampType(), False),
-        StructField("end_time", TimestampType(), True),
-        StructField("status", StringType(), False),
-        StructField("rows_inserted", LongType(), True),
-        StructField("rows_updated", LongType(), True),
-        StructField("error_message", StringType(), True),
-        StructField("load_timestamp", TimestampType(), False),
-    ])
-
-    log_df = spark.createDataFrame(log_row, schema=logs_schema)
+    log_df = spark.createDataFrame(log_row, schema=PIPELINE_EXECUTION_LOGS_SCHEMA)
 
     try:
         delta_table = DeltaTable.forName(spark, table_name)
@@ -318,24 +327,21 @@ def end_run(
 
 @contextmanager
 def log_run(spark: SparkSession, layer: str, parameter: str, batch_id: str, catalog: str = "workspace"):
-    """
-    Context manager that writes a log row to ops.pipeline_execution_logs with
-    start_time, end_time, status (SUCCESS/FAILURE), rows_inserted, rows_updated, error_message.
-    Catches errors, logs FAILURE to Delta, and re-raises the exception.
-    """
+    """Context manager that writes a log row to ops.pipeline_execution_logs."""
     run_ctx = start_run(spark, layer, parameter, batch_id, catalog)
     try:
         yield run_ctx
         end_time = datetime.now(timezone.utc)
+        run_ctx["status"] = "SUCCESS"
         end_run(
             spark=spark,
             log_id=run_ctx["log_id"],
             layer=layer,
-            parameter=parameter,
+            parameter=run_ctx.get("parameter", parameter),
             batch_id=batch_id,
             start_time=run_ctx["start_time"],
             end_time=end_time,
-            status="SUCCESS",
+            status=run_ctx.get("status", "SUCCESS"),
             rows_inserted=run_ctx.get("rows_inserted", 0),
             rows_updated=run_ctx.get("rows_updated", 0),
             error_message=None,
@@ -343,16 +349,17 @@ def log_run(spark: SparkSession, layer: str, parameter: str, batch_id: str, cata
         )
     except Exception as exc:
         end_time = datetime.now(timezone.utc)
+        run_ctx["status"] = "FAILURE"
         try:
             end_run(
                 spark=spark,
                 log_id=run_ctx["log_id"],
                 layer=layer,
-                parameter=parameter,
+                parameter=run_ctx.get("parameter", parameter),
                 batch_id=batch_id,
                 start_time=run_ctx["start_time"],
                 end_time=end_time,
-                status="FAILURE",
+                status=run_ctx.get("status", "FAILURE"),
                 rows_inserted=run_ctx.get("rows_inserted", 0),
                 rows_updated=run_ctx.get("rows_updated", 0),
                 error_message=str(exc),
@@ -376,10 +383,7 @@ def quarantine_records(
     rejection_reason: str,
     batch_id: str = "unknown"
 ) -> int:
-    """
-    Appends malformed or rejected records into <catalog>.ops.silver_quarantine
-    without failing the execution batch.
-    """
+    """Idempotent per (batch_id, payload, reason) quarantine sink for rejected rows."""
     try:
         if df_rejected.limit(1).count() == 0:
             return 0
@@ -387,21 +391,60 @@ def quarantine_records(
         return 0
 
     table_name = f"{catalog}.ops.silver_quarantine"
-    now_ts = F.current_timestamp()
+    cols = df_rejected.columns
+    volatile = {"load_timestamp", "batch_id", "rejection_reason", "_raw_record"}
+    payload_cols = [c for c in cols if c not in volatile]
+    payload = F.coalesce(
+        F.col("_raw_record") if "_raw_record" in cols else F.lit(None),
+        F.to_json(F.struct(*[F.col(c) for c in payload_cols]))
+    )
+    reason_expr = F.coalesce(
+        F.col("rejection_reason") if "rejection_reason" in cols else F.lit(None),
+        F.lit(rejection_reason)
+    )
+    repo_expr = F.col("repo_full_name") if "repo_full_name" in cols else F.lit("UNKNOWN")
 
-    quarantine_df = df_rejected.select(
-        F.expr("uuid()").alias("quarantine_id"),
-        F.lit(layer).alias("layer"),
-        F.lit(entity).alias("entity"),
-        (F.col("repo_full_name") if "repo_full_name" in df_rejected.columns else F.lit("UNKNOWN")).alias("repo_full_name"),
-        F.lit(rejection_reason).alias("rejection_reason"),
-        F.to_json(F.struct("*")).alias("raw_payload"),
-        F.lit(batch_id).alias("batch_id"),
-        now_ts.alias("load_timestamp")
+    quarantine_df = (
+        df_rejected.select(
+            repo_expr.alias("repo_full_name"),
+            reason_expr.alias("rejection_reason"),
+            payload.alias("raw_payload")
+        )
+        .withColumn("layer", F.lit(layer))
+        .withColumn("entity", F.lit(entity))
+        .withColumn("batch_id", F.lit(batch_id))
+        .withColumn(
+            "quarantine_id",
+            F.sha2(
+                F.concat_ws(
+                    "||",
+                    F.col("layer"),
+                    F.col("entity"),
+                    F.col("repo_full_name"),
+                    F.col("batch_id"),
+                    F.col("rejection_reason"),
+                    F.col("raw_payload"),
+                ),
+                256,
+            )
+        )
+        .withColumn("load_timestamp", F.current_timestamp())
+        .dropDuplicates(["quarantine_id"]) 
+        .select("quarantine_id", "layer", "entity", "repo_full_name", "rejection_reason", "raw_payload", "batch_id", "load_timestamp")
     )
 
     count = quarantine_df.count()
-    quarantine_df.write.format("delta").mode("append").option("mergeSchema", "true").saveAsTable(table_name)
+    if not spark.catalog.tableExists(table_name):
+        quarantine_df.write.format("delta").mode("append").option("mergeSchema", "true").saveAsTable(table_name)
+    else:
+        try:
+            delta_table = DeltaTable.forName(spark, table_name)
+            delta_table.alias("target").merge(
+                quarantine_df.alias("source"),
+                "target.quarantine_id = source.quarantine_id"
+            ).whenNotMatchedInsertAll().execute()
+        except Exception:
+            quarantine_df.write.format("delta").mode("append").option("mergeSchema", "true").saveAsTable(table_name)
     return count
 
 
@@ -413,21 +456,29 @@ log_pipeline_execution = end_run
 
 
 def sanitize_commit_message(message_col: str):
-    """Extracts first line of commit message and scrubs Signed-off-by trailers."""
-    first_line = F.split(F.col(message_col) if isinstance(message_col, str) else message_col, r"\r?\n").getItem(0)
-    clean_line = F.trim(first_line)
-    return F.when(
+    """Extracts the first line of a commit message, scrubs trailers, and masks e-mail addresses."""
+    target_col = F.col(message_col) if isinstance(message_col, str) else message_col
+    first_line = F.split(target_col, r"\r?\n").getItem(0)
+    clean_line = F.trim(F.regexp_replace(first_line, r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[EMAIL]"))
+    sanitized = F.when(
         clean_line.rlike(r"(?i)^(signed-off-by|co-authored-by):"),
         F.lit("[TRUNCATED_TRAILER]")
     ).otherwise(clean_line)
+    return sanitized
 
 
 def parse_iso_timestamp(col_name: str):
-    """Safely converts ISO-8601 string timestamp to PySpark TimestampType."""
+    """Safely converts ISO-8601 string timestamp to a PySpark TimestampType."""
+    if col_name is None:
+        return F.lit(None).cast(TimestampType())
+
     target_col = F.col(col_name) if isinstance(col_name, str) else col_name
-    return F.coalesce(
-        F.to_timestamp(target_col, "yyyy-MM-dd'T'HH:mm:ss'Z'"),
-        F.to_timestamp(target_col, "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"),
+    empty_or_null = target_col.isNull() | (F.trim(F.col(col_name) if isinstance(col_name, str) else target_col.cast("string")) == "")
+    candidates = [
+        F.to_timestamp(target_col, "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"),
         F.to_timestamp(target_col, "yyyy-MM-dd'T'HH:mm:ssXXX"),
-        F.to_timestamp(target_col)
-    )
+        F.to_timestamp(target_col, "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"),
+        F.to_timestamp(target_col, "yyyy-MM-dd'T'HH:mm:ss'Z'"),
+        F.to_timestamp(target_col),
+    ]
+    return F.when(empty_or_null, F.lit(None).cast(TimestampType())).otherwise(F.coalesce(*candidates))

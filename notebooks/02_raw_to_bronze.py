@@ -135,8 +135,9 @@ def process_entity(
     Enforces explicit schema, quarantine routing, deduplication, time filtering,
     and Delta MERGE INTO. Wrapped in log_run for audit compliance.
     """
-    file_path = f"{base_path.rstrip('/')}/{repo_slug}/{entity_name}.json"
-    repo_full_name = repo_slug.replace("_", "/", 1) if "_" in repo_slug else repo_slug
+    repo_full_name = repo_slug if "/" in repo_slug else repo_slug.replace("_", "/", 1)
+    dir_slug = repo_full_name.replace("/", "_")
+    file_path = f"{base_path.rstrip('/')}/{dir_slug}/{entity_name}.json"
     target_table_name = TABLE_NAME_MAP.get(entity_name, entity_name)
     target_table = f"{catalog}.bronze.{target_table_name}"
     pk_field = PRIMARY_KEYS.get(entity_name, "id")

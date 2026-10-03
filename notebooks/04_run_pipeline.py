@@ -25,8 +25,8 @@
 dbutils.widgets.text("catalog",        "workspace",                         "Unity Catalog Name")
 dbutils.widgets.text("base_path",      "/Volumes/workspace/bronze_data/raw", "Volume Base Path")
 dbutils.widgets.text("batch_id",       "",                                   "Batch ID (empty = auto)")
-dbutils.widgets.text("nb_02_path",     "notebooks/02_raw_to_bronze",         "Path to notebook 02")
-dbutils.widgets.text("nb_03_path",     "notebooks/03_bronze_to_silver",      "Path to notebook 03")
+dbutils.widgets.text("nb_02_path",     "./02_raw_to_bronze",                 "Path to notebook 02")
+dbutils.widgets.text("nb_03_path",     "./03_bronze_to_silver",              "Path to notebook 03")
 dbutils.widgets.text("timeout_s",      "3600",                               "Notebook timeout (seconds)")
 # Section A/D date window — override these to change which window is fetched
 dbutils.widgets.text("incr_since",     "2026-09-25T00:00:00Z",               "Section A+D: incremental since")

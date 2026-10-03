@@ -14,13 +14,15 @@
 # COMMAND ----------
 dbutils.widgets.text("catalog", "workspace", "Unity Catalog Name")
 dbutils.widgets.text("bronze_schema", "bronze", "Bronze Schema Name")
+dbutils.widgets.text("volume_schema", "bronze_data", "Volume Schema Name")
 dbutils.widgets.text("silver_schema", "silver", "Silver Schema Name")
 dbutils.widgets.text("ops_schema", "ops", "Ops Schema Name")
-dbutils.widgets.text("bronze_volume", "raw_json", "Bronze Volume Name")
+dbutils.widgets.text("bronze_volume", "raw", "Bronze Volume Name")
 dbutils.widgets.dropdown("reset_tables", "false", ["false", "true"], "Drop Tables (Clean Reset)")
 
 catalog = dbutils.widgets.get("catalog").strip()
 bronze_schema = dbutils.widgets.get("bronze_schema").strip()
+volume_schema = dbutils.widgets.get("volume_schema").strip()
 silver_schema = dbutils.widgets.get("silver_schema").strip()
 ops_schema = dbutils.widgets.get("ops_schema").strip()
 bronze_volume = dbutils.widgets.get("bronze_volume").strip()
@@ -28,6 +30,7 @@ reset_tables = dbutils.widgets.get("reset_tables").strip().lower() == "true"
 
 print(f"Catalog:       {catalog}")
 print(f"Bronze Schema: {bronze_schema}")
+print(f"Volume Schema: {volume_schema}")
 print(f"Silver Schema: {silver_schema}")
 print(f"Ops Schema:    {ops_schema}")
 print(f"Bronze Volume: {bronze_volume}")
@@ -54,13 +57,13 @@ batch_id = datetime.now(timezone.utc).strftime("setup_%Y%m%d_%H%M%S")
 # COMMAND ----------
 with log_run(spark, layer="SETUP", parameter=f"catalog={catalog}", batch_id=batch_id, catalog=catalog) as run_ctx:
     # 1. Schemas DDL
-    for s in [bronze_schema, silver_schema, ops_schema]:
+    for s in [bronze_schema, volume_schema, silver_schema, ops_schema]:
         spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{s}")
         print(f"Verified schema: {catalog}.{s}")
 
     # 2. Volume DDL
-    spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.{bronze_schema}.{bronze_volume}")
-    print(f"Verified Volume: /Volumes/{catalog}/{bronze_schema}/{bronze_volume}")
+    spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.{volume_schema}.{bronze_volume}")
+    print(f"Verified Volume: /Volumes/{catalog}/{volume_schema}/{bronze_volume}")
 
     # 3. Optional Table Clean Reset
     if reset_tables:
