@@ -153,6 +153,9 @@ Primary key: `(repo_full_name, sha)` · Date filter column: `commit.author.date`
 | `commit.message` | STRING | ✓ | | Full commit message — headline only kept in Silver |
 | `commit.comment_count` | INTEGER | ✓ | | Number of commit comments |
 | `commit.verification.verified` | BOOLEAN | ✓ | | GPG signature valid |
+| `url` | STRING | ✓ | | GitHub commit REST API URL |
+| `html_url` | STRING | ✓ | | GitHub web HTML URL |
+| `comments_url` | STRING | ✓ | | Commit comments API URL |
 | `author.login` | STRING | ✓ | | GitHub actor login |
 | `author.id` | LONG | ✓ | | GitHub actor numeric ID |
 | `author.type` | STRING | ✓ | | `"User"` or `"Bot"` |
@@ -171,15 +174,24 @@ Primary key: `(repo_full_name, id)` · Date filter column: `updated_at`
 | Column | Type | Nullable | PK | Description |
 |---|---|---|---|---|
 | `id` | LONG | ✗ | ✓ | GitHub issue numeric ID |
+| `node_id` | STRING | ✓ | | GitHub GraphQL node ID |
+| `url` | STRING | ✓ | | GitHub issue REST API URL |
+| `repository_url` | STRING | ✓ | | Repository REST API URL |
+| `labels_url` | STRING | ✓ | | Issue labels API URL |
+| `comments_url` | STRING | ✓ | | Issue comments API URL |
+| `events_url` | STRING | ✓ | | Issue events API URL |
+| `html_url` | STRING | ✓ | | GitHub web HTML URL |
 | `number` | INTEGER | ✗ | | Issue number (human-visible) |
 | `state` | STRING | ✓ | | `"open"` or `"closed"` |
 | `state_reason` | STRING | ✓ | | Closure reason |
+| `locked` | BOOLEAN | ✓ | | Locked state |
 | `title` | STRING | ✓ | | Issue title |
 | `body` | STRING | ✓ | | Issue body text |
 | `user.login` | STRING | ✓ | | Author GitHub login |
 | `user.id` | LONG | ✓ | | Author GitHub ID |
 | `user.type` | STRING | ✓ | | `"User"` or `"Bot"` |
 | `labels` | ARRAY\<STRUCT\> | ✓ | | Label id, name, color |
+| `assignee` | STRUCT | ✓ | | Primary assignee user struct |
 | `assignees` | ARRAY\<STRUCT\> | ✓ | | Assignee user structs |
 | `milestone.title` | STRING | ✓ | | Milestone name |
 | `comments` | INTEGER | ✓ | | Comment count |
@@ -187,8 +199,10 @@ Primary key: `(repo_full_name, id)` · Date filter column: `updated_at`
 | `updated_at` | STRING | ✓ | | Last update timestamp |
 | `closed_at` | STRING | ✓ | | Closure timestamp (nullable for open) |
 | `author_association` | STRING | ✓ | | `"MEMBER"`, `"CONTRIBUTOR"`, etc. |
-| `pull_request` | STRUCT | ✓ | | **Non-null = this is a PR, not an issue** |
+| `active_lock_reason` | STRING | ✓ | | Active lock reason |
 | `draft` | BOOLEAN | ✓ | | Draft state |
+| `pull_request` | STRUCT | ✓ | | **Non-null = this is a PR, not an issue** |
+| `timeline_url` | STRING | ✓ | | Issue timeline API URL |
 | `repo_full_name` | STRING | ✗ | ✓ | Injected |
 | `load_timestamp` | TIMESTAMP | ✗ | | Injected |
 | `_source_file` | STRING | ✓ | | Injected |
@@ -201,24 +215,41 @@ Primary key: `(repo_full_name, id)` · Date filter column: `updated_at`
 | Column | Type | Nullable | PK | Description |
 |---|---|---|---|---|
 | `id` | LONG | ✗ | ✓ | GitHub PR numeric ID |
+| `node_id` | STRING | ✓ | | GitHub GraphQL node ID |
+| `url` | STRING | ✓ | | GitHub PR REST API URL |
+| `html_url` | STRING | ✓ | | GitHub web HTML URL |
+| `diff_url` | STRING | ✓ | | PR diff download URL |
+| `patch_url` | STRING | ✓ | | PR patch download URL |
+| `issue_url` | STRING | ✓ | | PR issue API URL |
 | `number` | INTEGER | ✗ | | PR number |
 | `state` | STRING | ✓ | | `"open"` or `"closed"` |
+| `locked` | BOOLEAN | ✓ | | Locked state |
 | `title` | STRING | ✓ | | PR title |
 | `user.login` | STRING | ✓ | | Author login |
 | `user.type` | STRING | ✓ | | `"User"` or `"Bot"` |
+| `body` | STRING | ✓ | | PR description body |
 | `created_at` | STRING | ✓ | | Creation timestamp |
 | `updated_at` | STRING | ✓ | | Last update timestamp |
 | `closed_at` | STRING | ✓ | | Closure timestamp |
 | `merged_at` | STRING | ✓ | | Merge timestamp |
 | `merge_commit_sha` | STRING | ✓ | | SHA of merge commit |
-| `draft` | BOOLEAN | ✓ | | Draft PR flag |
-| `head.ref` | STRING | ✓ | | Source branch name |
-| `base.ref` | STRING | ✓ | | Target branch name |
-| `labels` | ARRAY\<STRUCT\> | ✓ | | PR labels |
+| `assignee` | STRUCT | ✓ | | Primary assignee user struct |
 | `assignees` | ARRAY\<STRUCT\> | ✓ | | Assignee structs |
 | `requested_reviewers` | ARRAY\<STRUCT\> | ✓ | | Reviewer structs |
+| `requested_teams` | ARRAY\<STRUCT\> | ✓ | | Requested review teams |
+| `labels` | ARRAY\<STRUCT\> | ✓ | | PR labels |
+| `milestone` | STRUCT | ✓ | | Milestone struct |
+| `draft` | BOOLEAN | ✓ | | Draft PR flag |
+| `commits_url` | STRING | ✓ | | PR commits API URL |
+| `review_comments_url` | STRING | ✓ | | Review comments API URL |
+| `review_comment_url` | STRING | ✓ | | Review comment API URL template |
+| `comments_url` | STRING | ✓ | | PR comments API URL |
+| `statuses_url` | STRING | ✓ | | PR commit statuses API URL |
+| `head.ref` | STRING | ✓ | | Source branch name |
+| `base.ref` | STRING | ✓ | | Target branch name |
 | `author_association` | STRING | ✓ | | Contributor role |
 | `auto_merge` | STRING | ✓ | | Auto-merge config |
+| `active_lock_reason` | STRING | ✓ | | Active lock reason |
 | `repo_full_name` | STRING | ✗ | ✓ | Injected |
 | `load_timestamp` | TIMESTAMP | ✗ | | Injected |
 | `_source_file` | STRING | ✓ | | Injected |
@@ -231,17 +262,24 @@ Primary key: `(repo_full_name, id)` · Date filter column: `published_at`
 | Column | Type | Nullable | PK | Description |
 |---|---|---|---|---|
 | `id` | LONG | ✗ | ✓ | Release numeric ID |
+| `node_id` | STRING | ✓ | | GitHub GraphQL node ID |
+| `url` | STRING | ✓ | | GitHub release REST API URL |
+| `assets_url` | STRING | ✓ | | Release assets API URL |
+| `upload_url` | STRING | ✓ | | Release assets upload URL template |
+| `html_url` | STRING | ✓ | | GitHub web HTML URL |
 | `tag_name` | STRING | ✓ | | Git tag (e.g. `v1.4.0`) |
+| `target_commitish` | STRING | ✓ | | Target branch or commit SHA |
 | `name` | STRING | ✓ | | Release display name |
 | `draft` | BOOLEAN | ✓ | | Unpublished draft |
+| `immutable` | BOOLEAN | ✓ | | Immutability flag |
 | `prerelease` | BOOLEAN | ✓ | | Pre-release flag |
 | `created_at` | STRING | ✓ | | Tag creation time |
 | `published_at` | STRING | ✓ | | Publication time |
 | `author.login` | STRING | ✓ | | Releasing actor |
 | `assets` | ARRAY\<STRUCT\> | ✓ | | Downloadable assets (id, name, size, download_count) |
-| `body` | STRING | ✓ | | Release notes |
 | `tarball_url` | STRING | ✓ | | Source tarball URL |
 | `zipball_url` | STRING | ✓ | | Source zip URL |
+| `body` | STRING | ✓ | | Release notes |
 | `repo_full_name` | STRING | ✗ | ✓ | Injected |
 | `load_timestamp` | TIMESTAMP | ✗ | | Injected |
 | `_source_file` | STRING | ✓ | | Injected |
@@ -254,25 +292,28 @@ Primary key: `(repo_full_name, id)` · Single-record per repo per run
 | Column | Type | Nullable | PK | Description |
 |---|---|---|---|---|
 | `id` | LONG | ✗ | ✓ | Repository numeric ID |
-| `full_name` | STRING | ✗ | ✓ | `owner/repo` |
+| `node_id` | STRING | ✓ | | GitHub GraphQL node ID |
 | `name` | STRING | ✓ | | Short repository name |
-| `description` | STRING | ✓ | | Repository description |
+| `full_name` | STRING | ✗ | ✓ | `owner/repo` |
 | `private` | BOOLEAN | ✓ | | Private flag (always false for tracked repos) |
-| `fork` | BOOLEAN | ✓ | | Fork flag |
 | `owner.login` | STRING | ✓ | | Owner login |
 | `owner.type` | STRING | ✓ | | `"Organization"` or `"User"` |
+| `html_url` | STRING | ✓ | | GitHub web HTML URL |
+| `description` | STRING | ✓ | | Repository description |
+| `fork` | BOOLEAN | ✓ | | Fork flag |
+| `url` | STRING | ✓ | | GitHub repository API URL |
 | `created_at` | STRING | ✓ | | Repository creation time |
 | `updated_at` | STRING | ✓ | | Last metadata update |
 | `pushed_at` | STRING | ✓ | | Last commit push time |
 | `size` | LONG | ✓ | | Repository size (KB) |
 | `stargazers_count` | INTEGER | ✓ | | Star count |
 | `watchers_count` | INTEGER | ✓ | | Watcher count |
+| `language` | STRING | ✓ | | Primary language |
 | `forks_count` | INTEGER | ✓ | | Fork count |
 | `open_issues_count` | INTEGER | ✓ | | Open issues (includes PRs) |
-| `language` | STRING | ✓ | | Primary language |
+| `license.spdx_id` | STRING | ✓ | | SPDX license identifier |
 | `default_branch` | STRING | ✓ | | Default branch name |
 | `topics` | ARRAY\<STRING\> | ✓ | | Repository topic tags |
-| `license.spdx_id` | STRING | ✓ | | SPDX license identifier |
 | `subscribers_count` | INTEGER | ✓ | | Subscriber (watch) count |
 | `network_count` | INTEGER | ✓ | | Network fork count |
 | `repo_full_name` | STRING | ✗ | ✓ | Injected |
@@ -412,10 +453,10 @@ and drift detection audit trails.
 | `batch_id` | STRING | ✓ | Unique batch execution identifier |
 | `start_time` | TIMESTAMP | ✗ | Run start time (UTC) |
 | `end_time` | TIMESTAMP | ✓ | Run end time (null while in-flight) |
-| `status` | STRING | ✗ | `"SUCCESS"`, `"EMPTY"`, `"ALL_QUARANTINED"`, or `"FAILURE"` |
+| `status` | STRING | ✗ | Allowed: `"SUCCESS"` or `"FAILURE"`. (Diagnostics such as `NO_DATA`, `ALL_RECORDS_QUARANTINED`, `PARTIAL_QUARANTINE` are preserved in `error_message`) |
 | `rows_inserted` | LONG | ✓ | Delta `numTargetRowsInserted` metric |
 | `rows_updated` | LONG | ✓ | Delta `numTargetRowsUpdated` metric |
-| `error_message` | STRING | ✓ | Exception message / drift notes |
+| `error_message` | STRING | ✓ | Exception message / diagnostic notes / drift notes |
 | `load_timestamp` | TIMESTAMP | ✗ | Row write time |
 
 ### 7.2 `ops.silver_quarantine`
@@ -425,12 +466,12 @@ The batch continues; no run is cancelled by quarantine events.
 
 | Column | Type | Nullable | Description |
 |---|---|---|---|
-| `quarantine_id` | STRING | ✗ | UUID for this quarantine entry |
+| `quarantine_id` | STRING | ✗ | Deterministic salted hash: `SHA-256(concat(raw_payload, salt, batch_id))` |
 | `layer` | STRING | ✗ | `"bronze"` or `"silver"` |
 | `entity` | STRING | ✗ | Source entity (`commits`, `issues`, etc.) |
 | `repo_full_name` | STRING | ✓ | Source repository |
 | `rejection_reason` | STRING | ✗ | E.g. `"_corrupt_record"`, `"type_mismatch: comments cannot cast to int"`, `"unparseable_date: created_at"`, `"null_primary_key"` |
-| `raw_payload` | STRING | ✓ | Full JSON of the rejected record |
+| `raw_payload` | STRING | ✓ | Serialized JSON of rejected record with all raw email addresses scrubbed (`[EMAIL]` masked) prior to storage and `quarantine_id` calculation |
 | `batch_id` | STRING | ✓ | Unique batch execution identifier |
 | `load_timestamp` | TIMESTAMP | ✗ | Quarantine write time |
 
