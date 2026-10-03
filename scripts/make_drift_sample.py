@@ -7,20 +7,18 @@ detection and Silver quarantine logic in the pipeline:
 
 Anomaly A — New unexpected top-level field:
     Every record gets  "new_field_test": "drift_injected"
-    The Bronze notebook should detect this extra column and log it in
-    notes/error_message rather than silently dropping it. mergeSchema
-    will evolve the table to absorb it.
+    Bronze absorbs it via schema evolution (evolve_table_schema), adding a new
+    STRING column to the Bronze table without dropping data.
 
 Anomaly B — Type corruption (issues only):
-    3 records have their "comments" field changed from an integer to the
-    string "many". The Silver transform casts comments to IntegerType, so
-    these 3 rows CANNOT be cast and must be quarantined in ops.silver_quarantine
-    with rejection_reason = 'type_mismatch: comments cannot cast to int'.
+    3 records (indices 1, 2, 3) have their "comments" field changed from an integer to the
+    string "many". In Bronze per-record parsing, these 3 records fail schema parsing
+    and are quarantined in ops.silver_quarantine with layer='bronze'.
 
 Anomaly C — Unparseable date (issues only):
-    1 record (index 0) has its "created_at" set to "not-a-date".
-    The Silver transform will fail to parse this as TimestampType and must
-    quarantine that row with rejection_reason = 'unparseable_date: created_at'.
+    1 true issue record (index 4) has its "created_at" set to "not-a-date".
+    Bronze accepts it, but Silver fails to parse it as TimestampType and quarantines
+    that row in ops.silver_quarantine with layer='silver'.
 
 Usage:
     python scripts/make_drift_sample.py
@@ -50,8 +48,8 @@ NEW_FIELD_VALUE = "drift_injected"
 # Indices (0-based) that get the type-corruption anomaly (B)
 TYPE_CORRUPT_INDICES = [1, 2, 3]
 
-# Index (0-based) that gets the bad-date anomaly (C)
-BAD_DATE_INDEX = 0
+# Index (0-based) that gets the bad-date anomaly (C) - index 4 is a true issue
+BAD_DATE_INDEX = 4
 BAD_DATE_VALUE = "not-a-date"
 
 
@@ -112,7 +110,7 @@ def print_summary(entity: str, original: list, drifted: list) -> None:
         b_count = sum(1 for r in drifted if r.get("comments") == "many")
         c_count = sum(1 for r in drifted if r.get("created_at") == BAD_DATE_VALUE)
         print(f"    Anomaly A ({NEW_FIELD!r})     : {a_count} records")
-        print(f"    Anomaly B (comments='many')         : {b_count} records  [expect Silver quarantine]")
+        print(f"    Anomaly B (comments='many')         : {b_count} records  [expect Bronze quarantine]")
         print(f"    Anomaly C (created_at='not-a-date') : {c_count} record   [expect Silver quarantine]")
     elif entity == "commits":
         a_count = sum(1 for r in drifted if NEW_FIELD in r)

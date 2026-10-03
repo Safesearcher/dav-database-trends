@@ -241,18 +241,18 @@ show_logs("after SECTION B", n=10)
 # MAGIC ## ══════════════════════════════════════════════════════
 # MAGIC **Purpose:** Validate that the pipeline correctly handles schema drift:
 # MAGIC - **Anomaly A:** New unexpected top-level field `new_field_test` on every record.
-# MAGIC   → Bronze must log the drift in `error_message` and evolve the table via `mergeSchema`.
+# MAGIC   → Bronze absorbs it via schema evolution (evolve_table_schema), adding a new STRING column.
 # MAGIC - **Anomaly B:** `comments` field set to string `"many"` on 3 issue records.
-# MAGIC   → Silver must quarantine those 3 rows in `ops.silver_quarantine`.
-# MAGIC - **Anomaly C:** `created_at = "not-a-date"` on 1 issue record.
-# MAGIC   → Silver must quarantine that 1 row in `ops.silver_quarantine`.
+# MAGIC   → Bronze isolates and quarantines those 3 rows in `ops.silver_quarantine` with layer='bronze'.
+# MAGIC - **Anomaly C:** `created_at = "not-a-date"` on 1 true issue record (index 4).
+# MAGIC   → Silver quarantines that 1 row in `ops.silver_quarantine` with layer='silver'.
 # MAGIC
 # MAGIC **Pre-requisite:** Run `python scripts/make_drift_sample.py` locally and upload
-# MAGIC `samples/drift/` to the Volume at `{base_path}/drift/surrealdb_surrealdb/`.
+# MAGIC `samples/drift/` to the Volume at `{base_path}/drift/driftlab_surrealdb/`.
 
 # COMMAND ----------
 # ── C-1 : Configure drift test ───────────────────────────────────────────────
-C_REPO        = "surrealdb/surrealdb"
+C_REPO        = "driftlab/surrealdb"
 C_SINCE       = "2026-01-01T00:00:00Z"   # wide window — catches all drift records
 C_UNTIL       = ""
 C_RUN_MODE    = "full"
@@ -266,7 +266,7 @@ print(f"  batch_id          : {C_BATCH_ID}")
 print()
 print("  Pre-requisite check — drift files must exist on the Volume:")
 for entity in ("issues", "commits"):
-    path = f"{C_DRIFT_PATH}/surrealdb_surrealdb/{entity}.json"
+    path = f"{C_DRIFT_PATH}/driftlab_surrealdb/{entity}.json"
     try:
         dbutils.fs.ls(path)
         print(f"    ✓ {path}")
@@ -310,34 +310,65 @@ show_logs("after SECTION C", n=10)
 print("\n[C-4b] Drift-specific assertions")
 
 # 1. Bronze table must have evolved to include new_field_test
-bronze_cols = [c.name for c in spark.table(f"{CATALOG}.bronze.issues").schema]
-assert "new_field_test" in bronze_cols, \
-    "FAIL: 'new_field_test' not found in bronze.issues — mergeSchema did not evolve the table"
-print(f"  ✓ bronze.issues has 'new_field_test' column  (schema evolution confirmed)")
+bronze_issues_cols = [c.name for c in spark.table(f"{CATALOG}.bronze.issues").schema]
+bronze_commits_cols = [c.name for c in spark.table(f"{CATALOG}.bronze.commits").schema]
+assert "new_field_test" in bronze_issues_cols, \
+    "FAIL: 'new_field_test' not found in bronze.issues — schema evolution did not add the column"
+assert "new_field_test" in bronze_commits_cols, \
+    "FAIL: 'new_field_test' not found in bronze.commits — schema evolution did not add the column"
+print(f"  ✓ bronze.issues and bronze.commits have 'new_field_test' column  (schema evolution confirmed)")
 
-# 2. Quarantine must contain at least 4 rows for this drift batch
-# (3 type-mismatch + 1 bad-date = 4 minimum)
-quarantine_df = (
+# 2. Quarantine rows for this batch with layer='bronze' and entity='issues' == 3
+bronze_q = (
     spark.table(f"{CATALOG}.ops.silver_quarantine")
-         .filter(f"batch_id = '{C_BATCH_ID}' AND layer = 'silver'")
+         .filter(f"batch_id = '{C_BATCH_ID}' AND layer = 'bronze' AND entity = 'issues'")
 )
-q_count = quarantine_df.count()
-assert q_count >= 4, \
-    f"FAIL: Expected >= 4 quarantine rows for batch {C_BATCH_ID}, got {q_count}"
-print(f"  ✓ ops.silver_quarantine has {q_count} row(s) for drift batch  (>= 4 expected)")
+bronze_q_count = bronze_q.count()
+assert bronze_q_count == 3, \
+    f"FAIL: Expected == 3 bronze issues quarantine rows for batch {C_BATCH_ID}, got {bronze_q_count}"
+print(f"  ✓ ops.silver_quarantine has {bronze_q_count} row(s) with layer='bronze' and entity='issues' (== 3 expected)")
 
-# 3. Log entry must record drift detection in notes/error_message
-drift_log = (
-    spark.table(f"{CATALOG}.ops.pipeline_execution_logs")
-         .filter(f"batch_id = '{C_BATCH_ID}'")
+# 3. Quarantine rows for this batch with layer='silver' and entity='issues' >= 1
+silver_q = (
+    spark.table(f"{CATALOG}.ops.silver_quarantine")
+         .filter(f"batch_id = '{C_BATCH_ID}' AND layer = 'silver' AND entity = 'issues'")
 )
-drift_log_count = drift_log.count()
-print(f"  ✓ ops.pipeline_execution_logs has {drift_log_count} row(s) for drift batch")
+silver_q_count = silver_q.count()
+assert silver_q_count >= 1, \
+    f"FAIL: Expected >= 1 silver issues quarantine rows for batch {C_BATCH_ID}, got {silver_q_count}"
+print(f"  ✓ ops.silver_quarantine has {silver_q_count} row(s) with layer='silver' and entity='issues' (>= 1 expected)")
+
+# 4. Log entry must record drift detection in parameter
+drift_logs = (
+    spark.table(f"{CATALOG}.ops.pipeline_execution_logs")
+         .filter(f"batch_id = '{C_BATCH_ID}' AND layer = 'BRONZE'")
+         .filter("parameter LIKE '%drift_keys=%' AND parameter LIKE '%new_field_test%'")
+)
+assert drift_logs.count() > 0, \
+    f"FAIL: ops.pipeline_execution_logs row for batch {C_BATCH_ID} does not contain drift_keys with 'new_field_test'"
+print("  ✓ ops.pipeline_execution_logs has Bronze log entry with drift_keys containing 'new_field_test'")
 
 print("\n  All drift assertions passed.")
-quarantine_df.select(
+silver_q.select(
     "batch_id", "entity", "rejection_reason", "raw_payload"
 ).show(10, truncate=100)
+
+# COMMAND ----------
+# ── C-5 : Cleanup drift data from bronze/silver tables ───────────────────────
+print(f"\n[C-5] Cleanup {C_REPO} rows from Bronze and Silver")
+for tbl in ["issues", "commits"]:
+    try:
+        spark.sql(f"DELETE FROM {CATALOG}.bronze.{tbl} WHERE repo_full_name = '{C_REPO}'")
+    except Exception as e:
+        print(f"  Could not delete from bronze.{tbl}: {e}")
+
+for tbl in ["issues", "commits", "pull_requests"]:
+    try:
+        spark.sql(f"DELETE FROM {CATALOG}.silver.{tbl} WHERE repo_full_name = '{C_REPO}'")
+    except Exception as e:
+        print(f"  Could not delete from silver.{tbl}: {e}")
+
+print(f"  ✓ Cleaned up any rows for {C_REPO} from bronze and silver (quarantine and execution logs retained)")
 
 # COMMAND ----------
 # MAGIC %md
