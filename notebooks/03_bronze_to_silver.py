@@ -3,7 +3,7 @@
 # MAGIC %md
 # MAGIC # 03 - Bronze to Silver Transformation & Quality Cleansing
 # MAGIC
-# MAGIC **Transformations & Business Rules (progress.md Section 4.2 & 4.3):**
+# MAGIC **Transformations & Business Rules (docs/data_dictionary.md):**
 # MAGIC 1. **Issue vs. PR Disambiguation:** Excludes pull requests from issues (`pull_request IS NULL`).
 # MAGIC    * *Note on Cassandra & MongoDB:* 100% of records in their GitHub `issues.json` are PRs because true issues live on external ASF/MongoDB JIRA instances. Their Silver issues count is strictly 0.
 # MAGIC 2. **PII Masking Protocol:** Salting and SHA-256 hashing for all committer and author emails. Drops personal names and raw emails.

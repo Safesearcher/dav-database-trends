@@ -4,8 +4,8 @@
 
 **Last updated:** 2026-10-03  
 **Current branch:** `main`  
-**Last commit:** `6f8e17d` — *"phase 2 progress"*  
-**Test suite:** 8/8 tests passing ✅
+**Last commit:** `272c692` — *"fix: explicit bronze tables, schema sync, salt"*  
+**Test suite:** 12/12 tests passing ✅
 
 ---
 
@@ -44,7 +44,7 @@
 - [x] **`scripts/audit_bronze.py`** — Full automated DQ audit (11 check dimensions)
 - [x] **`audit/bronze_quality_report.md`** — 230-line report with scorecards
 - [x] **19 audit CSV artefacts** in `audit/` (coverage, duplicates, PII inventory, etc.)
-- [x] Zero duplicate primary keys across all 56,361 records
+- [x] Zero duplicate primary keys across all 54,260 records
 - [x] 100% of dates parse as valid ISO-8601 UTC
 - [x] Issue-PR overlap quantified per repo (Cassandra: 100% PRs, Postgres: 0 issues)
 
@@ -84,7 +84,7 @@
 | `MERGE INTO` for all writes (no append-only) | ✅ | `src/common.py::merge_delta` |
 | Widgets — no hardcoded paths or dates in logic cells | ✅ | All 4 notebooks |
 | Quarantine: corrupt JSON, null PK, type mismatch, bad date | ✅ | `src/common.py`, `notebooks/03` |
-| Schema drift detection + `mergeSchema` absorption | ✅ | `notebooks/02`, `src/common.py` |
+| Schema drift detection + `ALTER TABLE ... ADD COLUMNS` absorption | ✅ | `notebooks/02`, `src/common.py` |
 | FAILURE logged to `ops.pipeline_execution_logs` + re-raised | ✅ | `src/common.py::log_run` |
 | PII: salted SHA-256 hash on author/committer emails | ✅ | `src/common.py::hash_email`, `notebooks/03` |
 | Raw emails/names never written to Silver | ✅ | `notebooks/03` Silver schemas |
@@ -104,10 +104,10 @@
 
 | File | Tests | Status |
 |---|---|---|
-| `tests/test_schemas.py` | 4 tests: schemas exist, `load_timestamp`, PII masking, `is_bot` presence | ✅ 4/4 pass |
-| `tests/test_common.py` | 4 tests: `get_params`, `get_salt`, `bot_flag`, `start_run` | ✅ 4/4 pass |
+| `tests/test_schemas.py` | 6 tests: schemas exist, `load_timestamp`, PII masking, `is_bot`, logs columns, quarantine columns | ✅ 6/6 pass |
+| `tests/test_common.py` | 6 tests: `get_params`, `get_params_with_fake_dbutils`, `get_salt`, `get_salt_fallback`, `bot_flag`, `start_run` | ✅ 6/6 pass |
 | `tests/check_schemas.py` | Schema vs real JSON field coverage reporter | ✅ Runnable |
-| **Total** | **8 tests** | **✅ 8/8 pass** |
+| **Total** | **12 tests** | **✅ 12/12 pass** |
 
 ### 2.6 Documentation
 - [x] `README.md` — 630+ lines covering all 13 sections (overview, architecture, data dicts, execution guide, idempotency, PII, caveats, screenshots checklist)

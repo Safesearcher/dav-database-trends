@@ -176,7 +176,7 @@ ORDER BY tbl;
 
 ---
 
-### 11 — Incremental Run Widgets
+### 11 — Orchestrator Pipeline Widgets (11 Widgets)
 **File:** `11_incremental_run_widgets.png`  
 **Where:** `notebooks/04_run_pipeline.py` — widget bar at top
 
@@ -186,13 +186,17 @@ ORDER BY tbl;
 |---|---|
 | `catalog` | `workspace` |
 | `base_path` | `/Volumes/workspace/bronze_data/raw` |
-| `repo` | `ALL` |
-| `since` | `2026-09-25T00:00:00Z` |
-| `until` | *(empty)* |
-| `run_mode` | `incremental` |
 | `batch_id` | *(empty)* |
+| `nb_02_path` | `./02_raw_to_bronze` |
+| `nb_03_path` | `./03_bronze_to_silver` |
+| `timeout_s` | `3600` |
+| `incr_since` | `2026-09-25T00:00:00Z` |
+| `incr_until` | *(empty)* |
+| `backfill_repo` | `surrealdb/surrealdb` |
+| `backfill_since` | `2026-04-01T00:00:00Z` |
+| `backfill_until` | `2026-06-30T23:59:59Z` |
 
-**Capture:** The widget bar before running, with all values filled as above.
+**Capture:** The widget bar before running, with all 11 values configured as above.
 
 ---
 

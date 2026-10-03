@@ -135,6 +135,8 @@ All Bronze schemas are defined in [`src/schemas.py`](src/schemas.py) using expli
 Every Bronze table adds `repo_full_name`, `load_timestamp`, `_source_file`, and `batch_id`
 at ingest time. All Bronze schemas include `_corrupt_record` (StringType) for Spark PERMISSIVE mode.
 
+**Schema Drift Absorption:** Unexpected new top-level JSON fields are dynamically discovered via `discover_drift_keys` and absorbed into target Bronze tables as nullable `STRING` columns using explicit DDL (`ALTER TABLE <target> ADD COLUMNS (<col> STRING)`) prior to Delta `MERGE INTO`, preventing silent data loss.
+
 ### 5.1 `bronze.commits`
 Primary key: `(repo_full_name, sha)` · Date filter column: `commit.author.date`
 
@@ -497,49 +499,37 @@ This creates:
 
 ### 8.6 Widget Reference
 
-#### Standard Incremental Run (nightly cadence)
+#### Orchestrator Notebook (`notebooks/04_run_pipeline.py`)
 
-Run `notebooks/04_run_pipeline.py` with **Section A** enabled:
+The orchestrator defines 11 top-level widgets controlling all pipeline sections:
 
-| Widget | Value | Notes |
+| Widget | Default Value | Notes |
 |---|---|---|
-| `catalog` | `workspace` | Your Unity Catalog name |
-| `base_path` | `/Volumes/workspace/bronze_data/raw` | Volume path |
-| `repo` | `ALL` | Runs all 10 repos |
-| `since` | `2026-09-25T00:00:00Z` | Previous run cutoff |
-| `until` | *(empty)* | No upper bound |
-| `run_mode` | `incremental` | Filters by since/until |
-| `batch_id` | *(empty)* | Auto-generated |
+| `catalog` | `workspace` | Unity Catalog name |
+| `base_path` | `/Volumes/workspace/bronze_data/raw` | Unity Catalog Volume base path |
+| `batch_id` | *(empty)* | Optional run identifier (empty = auto-generated timestamp + UUID) |
+| `nb_02_path` | `./02_raw_to_bronze` | Relative path to Bronze ingestion notebook |
+| `nb_03_path` | `./03_bronze_to_silver` | Relative path to Silver transformation notebook |
+| `timeout_s` | `3600` | Sub-notebook execution timeout in seconds |
+| `incr_since` | `2026-09-25T00:00:00Z` | Section A+D: incremental lower bound |
+| `incr_until` | *(empty)* | Section A+D: incremental upper bound |
+| `backfill_repo` | `surrealdb/surrealdb` | Section B: target repository for backfill |
+| `backfill_since` | `2026-04-01T00:00:00Z` | Section B: backfill window start |
+| `backfill_until` | `2026-06-30T23:59:59Z` | Section B: backfill window end |
 
-#### Backfill Run (single repo, explicit window)
+> **Unbounded Date Filtering:** For all date widgets (`since`, `until`, `incr_since`, `incr_until`, `backfill_since`, `backfill_until`), leaving the widget value empty (`""`) signifies **unbounded** (no temporal cutoff applied in that direction).
 
-| Widget | Value | Notes |
-|---|---|---|
-| `catalog` | `workspace` | |
-| `base_path` | `/Volumes/workspace/bronze_data/raw` | |
-| `repo` | `surrealdb/surrealdb` | Single repo |
-| `since` | `2026-04-01T00:00:00Z` | Window start |
-| `until` | `2026-06-30T23:59:59Z` | Window end |
-| `run_mode` | `backfill` | Applies both filters |
-| `batch_id` | `backfill_surrealdb_q1fy26` | Human-readable label |
+#### Individual Execution Notebooks (`02_raw_to_bronze.py` & `03_bronze_to_silver.py`)
 
-#### Full Load (all data, no date filtering)
-
-| Widget | Value | Notes |
-|---|---|---|
-| `catalog` | `workspace` | |
-| `base_path` | `/Volumes/workspace/bronze_data/raw` | |
-| `repo` | `ALL` | All 10 repos |
-| `since` | *(empty)* | No lower bound |
-| `until` | *(empty)* | No upper bound |
-| `run_mode` | `full` | No date filter applied |
-| `batch_id` | `full_load_2026_04_to_09` | |
+When running `02` or `03` standalone outside `04`:
+- **`02_raw_to_bronze.py`**: `catalog`, `base_path`, `repo` (`ALL` or `owner/repo`), `entity` (`ALL` or entity name), `since`, `until`, `run_mode` (`full`, `incremental`, `backfill`), `batch_id`.
+- **`03_bronze_to_silver.py`**: `catalog`, `repo` (`ALL` or `owner/repo`), `since`, `until`, `run_mode` (`full`, `incremental`, `backfill`), `batch_id`, `salt`.
 
 #### Drift Test
 
 1. Run locally: `python scripts/make_drift_sample.py`
-2. Upload `samples/drift/` to `/Volumes/workspace/bronze_data/raw/drift/`
-3. Run Section C of `04_run_pipeline.py` with `base_path = /Volumes/.../raw/drift`
+2. Upload `samples/drift/` to `/Volumes/workspace/bronze_data/raw/drift/driftlab_surrealdb/`
+3. Run Section C of `04_run_pipeline.py` (reads from isolated pseudo-repo `driftlab/surrealdb` and automatically cleans up test rows from bronze and silver)
 
 ---
 
