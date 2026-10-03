@@ -22,6 +22,8 @@ try:
     from pyspark.sql import DataFrame, SparkSession
     from pyspark.sql import functions as F
     from pyspark.sql.types import (
+        StructType,
+        StructField,
         StringType,
         TimestampType,
         LongType,
@@ -36,6 +38,8 @@ except ImportError:
             return lambda *args, **kwargs: None
 
     F = _FStub()
+    StructType = object
+    StructField = object
     StringType = object
     TimestampType = object
     LongType = object
@@ -225,9 +229,35 @@ def add_metadata(df: DataFrame, source_file: str, batch_id: str) -> DataFrame:
 # 5. Delta Idempotency MERGE INTO Helper
 # -----------------------------------------------------------------------------
 
+def align_to_target(df: DataFrame, target_schema: StructType) -> tuple:
+    """
+    Pure function aligning source DataFrame columns to target_schema:
+    - columns_to_add: list of (col_name, type_string) for source-only columns
+    - target-only columns: added to df as F.lit(None).cast(<target type>)
+    - result DataFrame selected in target's column order
+    """
+    target_fields = {f.name: f for f in target_schema.fields}
+    target_names = [f.name for f in target_schema.fields]
+    source_fields = {f.name: f for f in df.schema.fields}
+
+    columns_to_add = []
+    for f in df.schema.fields:
+        if f.name not in target_fields:
+            type_str = f.dataType.simpleString() if hasattr(f.dataType, "simpleString") else str(f.dataType)
+            columns_to_add.append((f.name, type_str))
+
+    aligned_df = df
+    for f in target_schema.fields:
+        if f.name not in source_fields:
+            aligned_df = aligned_df.withColumn(f.name, F.lit(None).cast(f.dataType))
+
+    aligned_df = aligned_df.select(*target_names)
+    return aligned_df, columns_to_add
+
+
 def merge_delta(spark: SparkSession, df: DataFrame, target_table: str, keys: list, update_all: bool = True) -> tuple:
     """
-    Creates target Delta table if it doesn't exist; otherwise executes a MERGE INTO
+    Creates target Delta table if it doesn't exist; otherwise aligns schema and executes a MERGE INTO
     using composite keys. Returns (rows_inserted, rows_updated) parsed from operationMetrics.
     """
     if not spark.catalog.tableExists(target_table):
@@ -240,11 +270,20 @@ def merge_delta(spark: SparkSession, df: DataFrame, target_table: str, keys: lis
         inserted = df.count()
         return (inserted, 0)
 
+    target_schema = spark.table(target_table).schema
+    aligned_df, columns_to_add = align_to_target(df, target_schema)
+
+    if columns_to_add:
+        for col_name, type_str in columns_to_add:
+            spark.sql(f"ALTER TABLE {target_table} ADD COLUMNS (`{col_name}` {type_str})")
+        target_schema = spark.table(target_table).schema
+        aligned_df, _ = align_to_target(df, target_schema)
+
     delta_target = DeltaTable.forName(spark, target_table)
     match_expr = " AND ".join([f"target.{k} = source.{k}" for k in keys])
 
     merge_builder = delta_target.alias("target").merge(
-        df.alias("source"),
+        aligned_df.alias("source"),
         match_expr
     )
 
@@ -263,7 +302,7 @@ def merge_delta(spark: SparkSession, df: DataFrame, target_table: str, keys: lis
         num_inserted = int(metrics.get("numTargetRowsInserted", 0))
         num_updated = int(metrics.get("numTargetRowsUpdated", 0))
     else:
-        num_inserted = df.count()
+        num_inserted = aligned_df.count()
 
     return (num_inserted, num_updated)
 
@@ -363,11 +402,7 @@ def end_run(
     log_df = spark.createDataFrame(log_row, schema=PIPELINE_EXECUTION_LOGS_SCHEMA)
 
     try:
-        delta_table = DeltaTable.forName(spark, table_name)
-        delta_table.alias("target").merge(
-            log_df.alias("source"),
-            "target.log_id = source.log_id"
-        ).whenNotMatchedInsertAll().execute()
+        merge_delta(spark=spark, df=log_df, target_table=table_name, keys=["log_id"], update_all=False)
     except Exception:
         log_df.write.format("delta").mode("append").option("mergeSchema", "true").saveAsTable(table_name)
 
@@ -482,17 +517,10 @@ def quarantine_records(
     )
 
     count = quarantine_df.count()
-    if not spark.catalog.tableExists(table_name):
+    try:
+        merge_delta(spark=spark, df=quarantine_df, target_table=table_name, keys=["quarantine_id"], update_all=False)
+    except Exception:
         quarantine_df.write.format("delta").mode("append").option("mergeSchema", "true").saveAsTable(table_name)
-    else:
-        try:
-            delta_table = DeltaTable.forName(spark, table_name)
-            delta_table.alias("target").merge(
-                quarantine_df.alias("source"),
-                "target.quarantine_id = source.quarantine_id"
-            ).whenNotMatchedInsertAll().execute()
-        except Exception:
-            quarantine_df.write.format("delta").mode("append").option("mergeSchema", "true").saveAsTable(table_name)
     return count
 
 

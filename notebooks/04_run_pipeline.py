@@ -392,6 +392,22 @@ for tbl in ["issues", "commits", "pull_requests"]:
 print(f"  ✓ Cleaned up any rows for {C_REPO} from bronze and silver (quarantine and execution logs retained)")
 
 # COMMAND ----------
+# ── C-6 : Regression Guard — Normal Bronze Load After Drift ──────────────────
+print(f"\n[C-6] Regression guard: Normal Bronze load after drift schema evolution")
+# Runs a standard Bronze load on an evolved table (issues for redis/redis) without drift
+run_nb(NB_02, {
+    "catalog":   CATALOG,
+    "repo":      "redis/redis",
+    "entity":    "issues",
+    "base_path": BASE_PATH,
+    "since":     "",
+    "until":     "",
+    "batch_id":  f"{C_BATCH_ID}_regression_guard",
+    "run_mode":  "full",
+})
+print("  ✓ Regression guard passed: normal load succeeded against evolved table")
+
+# COMMAND ----------
 # MAGIC %md
 # MAGIC ---
 # MAGIC ## ══════════════════════════════════════════════════════

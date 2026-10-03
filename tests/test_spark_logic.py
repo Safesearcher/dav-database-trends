@@ -248,6 +248,71 @@ class TestSparkLogic(unittest.TestCase):
         self.assertEqual(res[0], "Issue reported by [EMAIL] on v1.2")
         self.assertEqual(res[1], "Clean title")
 
+    # -------------------------------------------------------------------------
+    # BUG 2 Tests: align_to_target pure function tests
+    # -------------------------------------------------------------------------
+    @unittest.skipIf(not HAS_SPARK, "Spark JVM runtime not available in local environment")
+    def test_align_to_target_missing_target_col(self):
+        from src.common import align_to_target
+        from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+
+        target_schema = StructType([
+            StructField("id", IntegerType(), True),
+            StructField("name", StringType(), True),
+            StructField("new_field_test", StringType(), True),
+        ])
+        source_df = spark.createDataFrame([(1, "Alice")], ["id", "name"])
+
+        aligned_df, cols_to_add = align_to_target(source_df, target_schema)
+        self.assertEqual(cols_to_add, [])
+        self.assertEqual(aligned_df.columns, ["id", "name", "new_field_test"])
+        row = aligned_df.first()
+        self.assertEqual(row["id"], 1)
+        self.assertEqual(row["name"], "Alice")
+        self.assertIsNone(row["new_field_test"])
+        self.assertIsInstance(aligned_df.schema["new_field_test"].dataType, StringType)
+
+    @unittest.skipIf(not HAS_SPARK, "Spark JVM runtime not available in local environment")
+    def test_align_to_target_extra_source_col(self):
+        from src.common import align_to_target
+        from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+
+        target_schema = StructType([
+            StructField("id", IntegerType(), True),
+            StructField("name", StringType(), True),
+        ])
+        source_df = spark.createDataFrame([(1, "Alice", "extra_val")], ["id", "name", "drift_col"])
+
+        aligned_df, cols_to_add = align_to_target(source_df, target_schema)
+        self.assertEqual(cols_to_add, [("drift_col", "string")])
+        self.assertEqual(aligned_df.columns, ["id", "name"])
+
+    @unittest.skipIf(not HAS_SPARK, "Spark JVM runtime not available in local environment")
+    def test_align_to_target_column_order_and_identical(self):
+        from src.common import align_to_target
+        from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+
+        target_schema = StructType([
+            StructField("col_a", IntegerType(), True),
+            StructField("col_b", StringType(), True),
+            StructField("col_c", StringType(), True),
+        ])
+        # Source with different column order
+        source_df = spark.createDataFrame([("val_c", 42, "val_b")], ["col_c", "col_a", "col_b"])
+
+        aligned_df, cols_to_add = align_to_target(source_df, target_schema)
+        self.assertEqual(cols_to_add, [])
+        self.assertEqual(aligned_df.columns, ["col_a", "col_b", "col_c"])
+        row = aligned_df.first()
+        self.assertEqual(row["col_a"], 42)
+        self.assertEqual(row["col_b"], "val_b")
+        self.assertEqual(row["col_c"], "val_c")
+
+        # Identical schema -> no-op
+        aligned_same, cols_same = align_to_target(aligned_df, target_schema)
+        self.assertEqual(cols_same, [])
+        self.assertEqual(aligned_same.columns, ["col_a", "col_b", "col_c"])
+
 
 if __name__ == "__main__":
     unittest.main()
