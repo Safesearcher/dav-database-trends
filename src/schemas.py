@@ -471,6 +471,7 @@ SILVER_QUARANTINE_SCHEMA = StructType([
     StructField("repo_full_name", StringType(), True),
     StructField("rejection_reason", StringType(), False),
     StructField("raw_payload", StringType(), True),
+    StructField("batch_id", StringType(), True),
     StructField("load_timestamp", TimestampType(), False),
 ])
 """Quarantine schema: captures malformed, unparseable, or schema-violating rows without failing pipeline batches."""
@@ -478,7 +479,8 @@ SILVER_QUARANTINE_SCHEMA = StructType([
 PIPELINE_EXECUTION_LOGS_SCHEMA = StructType([
     StructField("log_id", StringType(), False),
     StructField("layer", StringType(), False),
-    StructField("parameter_file", StringType(), False),
+    StructField("parameter", StringType(), True),
+    StructField("batch_id", StringType(), True),
     StructField("start_time", TimestampType(), False),
     StructField("end_time", TimestampType(), True),
     StructField("status", StringType(), False),

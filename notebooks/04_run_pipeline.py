@@ -120,6 +120,27 @@ def show_logs(label="", n=10):
 
 # COMMAND ----------
 # MAGIC %md
+# MAGIC ### Pre-flight: Validate Salt Configuration
+# MAGIC Ensures that PII salt is resolvable (via secrets, widget, or environment variable) before running pipeline notebooks.
+
+# COMMAND ----------
+import sys
+import os
+
+workspace_root = os.path.abspath(os.path.join(os.getcwd(), ".."))
+if workspace_root not in sys.path:
+    sys.path.append(workspace_root)
+
+from src.common import get_salt
+
+try:
+    _configured_salt = get_salt(dbutils)
+    print(f"  ✓ Salt verified and active: length = {len(_configured_salt)} characters")
+except Exception as _salt_err:
+    raise ValueError(f"Pre-flight failed: {_salt_err}")
+
+# COMMAND ----------
+# MAGIC %md
 # MAGIC ---
 # MAGIC ## ══════════════════════════════════════════════════════
 # MAGIC ## SECTION A — STANDARD INCREMENTAL RUN

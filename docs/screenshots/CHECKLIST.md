@@ -99,7 +99,7 @@ rows_inserted: 414   rows_updated: 0   batch_id: run_...
 
 **SQL to run:**
 ```sql
-SELECT log_id, layer, parameter_file, start_time, end_time,
+SELECT log_id, layer, parameter, batch_id, start_time, end_time,
        status, rows_inserted, rows_updated, error_message
 FROM   ops.pipeline_execution_logs
 ORDER  BY start_time DESC
@@ -119,7 +119,7 @@ for at least one Bronze and one Silver row.
 ```sql
 SELECT quarantine_id, layer, entity, repo_full_name,
        rejection_reason, LEFT(raw_payload, 200) AS raw_payload_preview,
-       load_timestamp
+       batch_id, load_timestamp
 FROM   ops.silver_quarantine
 LIMIT  10;
 ```

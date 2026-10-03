@@ -72,6 +72,17 @@ class TestMedallionSchemas(unittest.TestCase):
             self.assertIn("is_bot", [f.name for f in schema.fields])
             self.assertIsInstance(schema["is_bot"].dataType, BooleanType)
 
+    def test_pipeline_execution_logs_columns(self):
+        field_names = [f.name for f in PIPELINE_EXECUTION_LOGS_SCHEMA.fields]
+        self.assertIn("parameter", field_names)
+        self.assertIn("batch_id", field_names)
+        self.assertNotIn("parameter_file", field_names)
+
+    def test_silver_quarantine_columns(self):
+        field_names = [f.name for f in SILVER_QUARANTINE_SCHEMA.fields]
+        self.assertIn("batch_id", field_names)
+        self.assertIn("quarantine_id", field_names)
+
 
 if __name__ == "__main__":
     unittest.main()

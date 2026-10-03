@@ -144,6 +144,7 @@ Records rejected during Bronze ingestion or Silver transformation due to constra
 | `repo_full_name` | `STRING` | Yes | Repository identifier. |
 | `rejection_reason` | `STRING` | No | Explanation of why record was rejected. |
 | `raw_payload` | `STRING` | Yes | Complete serialized JSON representation of the rejected row. |
+| `batch_id` | `STRING` | Yes | Unique batch execution identifier. |
 | `load_timestamp` | `TIMESTAMP` | No | Rejection logging timestamp. |
 
 ### 3.2 `ops.pipeline_execution_logs`
@@ -153,11 +154,12 @@ Operational execution log tracking every notebook run across full and incrementa
 | :--- | :--- | :---: | :--- |
 | `log_id` | `STRING` | No | Unique UUID generated for the execution run. |
 | `layer` | `STRING` | No | Execution layer (`SETUP`, `BRONZE`, `SILVER`, `ORCHESTRATOR`). |
-| `parameter_file` | `STRING` | No | Parameters, widgets, and target file for the run. |
+| `parameter` | `STRING` | Yes | Parameters, widgets, and target file for the run. |
+| `batch_id` | `STRING` | Yes | Unique batch execution identifier. |
 | `start_time` | `TIMESTAMP` | No | Batch start UTC timestamp. |
 | `end_time` | `TIMESTAMP` | Yes | Batch finish UTC timestamp. |
-| `status` | `STRING` | No | Status: `SUCCESS` or `FAILED`. |
+| `status` | `STRING` | No | Status: `SUCCESS`, `EMPTY`, `ALL_QUARANTINED`, or `FAILED`. |
 | `rows_inserted` | `BIGINT` | Yes | Total rows inserted into target Delta table. |
 | `rows_updated` | `BIGINT` | Yes | Total rows updated via Delta MERGE. |
-| `error_message` | `STRING` | Yes | Traceback/error summary if status is `FAILED`. |
+| `error_message` | `STRING` | Yes | Traceback/error summary or schema drift details. |
 | `load_timestamp` | `TIMESTAMP` | No | Log insertion timestamp. |

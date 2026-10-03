@@ -46,6 +46,8 @@ workspace_root = os.path.abspath(os.path.join(os.getcwd(), ".."))
 if workspace_root not in sys.path:
     sys.path.append(workspace_root)
 
+from pyspark.sql.types import StructType, StructField, StringType, TimestampType
+from src.schemas import BRONZE_SCHEMAS
 from src.common import log_run, start_run, end_run
 
 batch_id = datetime.now(timezone.utc).strftime("setup_%Y%m%d_%H%M%S")
@@ -213,6 +215,26 @@ with log_run(spark, layer="SETUP", parameter=f"catalog={catalog}", batch_id=batc
         ) USING DELTA;
     """)
     print(f"Verified all 5 Silver tables in {catalog}.{silver_schema}")
+
+    # 7. Explicit Creation of Bronze Tables from BRONZE_SCHEMAS
+    TABLE_NAME_MAP = {
+        "commits": "commits",
+        "issues": "issues",
+        "pulls": "pull_requests",
+        "releases": "releases",
+        "repo_metadata": "repo_metadata",
+    }
+    LINEAGE = [
+        StructField("repo_full_name", StringType(), True),
+        StructField("_source_file", StringType(), True),
+        StructField("batch_id", StringType(), True),
+        StructField("load_timestamp", TimestampType(), True),
+    ]
+    for entity, schema in BRONZE_SCHEMAS.items():
+        fields = [f for f in schema.fields if f.name != "_corrupt_record"] + LINEAGE
+        (spark.createDataFrame([], StructType(fields)).write.format("delta").mode("ignore")
+             .saveAsTable(f"{catalog}.{bronze_schema}.{TABLE_NAME_MAP[entity]}"))
+    print(f"Verified all 5 Bronze tables in {catalog}.{bronze_schema}")
 
     # Set metrics in context
     run_ctx["rows_inserted"] = 12  # 2 ops + 5 silver + 5 bronze tables created/verified

@@ -405,11 +405,12 @@ and drift detection audit trails.
 | Column | Type | Nullable | Description |
 |---|---|---|---|
 | `log_id` | STRING | ✗ | UUID for this log entry |
-| `layer` | STRING | ✗ | `"bronze"` or `"silver"` |
-| `parameter_file` | STRING | ✗ | Notebook + entity + repo combination |
+| `layer` | STRING | ✗ | `"SETUP"`, `"BRONZE"`, `"SILVER"`, or `"ORCHESTRATOR"` |
+| `parameter` | STRING | ✓ | Parameters, widgets, and target file for the run |
+| `batch_id` | STRING | ✓ | Unique batch execution identifier |
 | `start_time` | TIMESTAMP | ✗ | Run start time (UTC) |
 | `end_time` | TIMESTAMP | ✓ | Run end time (null while in-flight) |
-| `status` | STRING | ✗ | `"SUCCESS"` or `"FAILURE"` |
+| `status` | STRING | ✗ | `"SUCCESS"`, `"EMPTY"`, `"ALL_QUARANTINED"`, or `"FAILURE"` |
 | `rows_inserted` | LONG | ✓ | Delta `numTargetRowsInserted` metric |
 | `rows_updated` | LONG | ✓ | Delta `numTargetRowsUpdated` metric |
 | `error_message` | STRING | ✓ | Exception message / drift notes |
@@ -428,6 +429,7 @@ The batch continues; no run is cancelled by quarantine events.
 | `repo_full_name` | STRING | ✓ | Source repository |
 | `rejection_reason` | STRING | ✗ | E.g. `"_corrupt_record"`, `"type_mismatch: comments cannot cast to int"`, `"unparseable_date: created_at"`, `"null_primary_key"` |
 | `raw_payload` | STRING | ✓ | Full JSON of the rejected record |
+| `batch_id` | STRING | ✓ | Unique batch execution identifier |
 | `load_timestamp` | TIMESTAMP | ✗ | Quarantine write time |
 
 **Rejection reason taxonomy:**
