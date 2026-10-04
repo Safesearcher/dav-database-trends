@@ -35,6 +35,7 @@ dbutils.widgets.text("incr_until",     "",                                   "Se
 dbutils.widgets.text("backfill_repo",  "surrealdb/surrealdb",                "Section B: repo for backfill")
 dbutils.widgets.text("backfill_since", "2026-04-01T00:00:00Z",               "Section B: backfill window start")
 dbutils.widgets.text("backfill_until", "2026-06-30T23:59:59Z",               "Section B: backfill window end")
+dbutils.widgets.text("salt", "", "PII salt (used if no secret scope)")
 
 # COMMAND ----------
 import uuid
@@ -79,6 +80,8 @@ print(f"  timeout   : {TIMEOUT}s")
 # Helper: run a single notebook, return its exit value, and print timing
 def run_nb(path, params, timeout=TIMEOUT):
     """Thin wrapper around dbutils.notebook.run with timing and error surfacing."""
+    if path == NB_03:
+        params = {**params, "salt": dbutils.widgets.get("salt")}
     started = datetime.now(timezone.utc)
     result = dbutils.notebook.run(path, timeout, params)
     elapsed = (datetime.now(timezone.utc) - started).total_seconds()
