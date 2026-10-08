@@ -80,6 +80,18 @@ def scrub_emails(col):
     return F.regexp_replace(target_col, EMAIL_REGEX, "[EMAIL]")
 
 
+def repo_dir_slug(repo_full_name: str) -> str:
+    """Converts owner/repo into filesystem slug owner_repo."""
+    return repo_full_name.replace("/", "_")
+
+
+def repo_full_name_of(slug: str) -> str:
+    """Converts owner_repo or owner/repo into canonical owner/repo format."""
+    if "/" in slug:
+        return slug
+    return slug.replace("_", "/", 1)
+
+
 # -----------------------------------------------------------------------------
 # 1. Parameter Widget Parser
 # -----------------------------------------------------------------------------
