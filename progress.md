@@ -2,10 +2,9 @@
 # PySpark Medallion Pipeline (Bronze → Silver → Gold)
 # University Data Analysis & Visualization — 2026
 
-**Last updated:** 2026-10-03  
-**Current branch:** `main`  
-**Last commit:** `272c692` — *"fix: explicit bronze tables, schema sync, salt"*  
-**Test suite:** 27/27 tests passing ✅ (0 skipped, verified with OpenJDK 17 + local PySpark)
+**Last updated:** 2026-10-10  
+**Current branch:** `ingest-notebook`  
+**Test suite:** 51/51 tests passing ✅ (11 skipped when Spark is not present, verified locally with uv)
 
 ---
 
@@ -13,18 +12,22 @@
 
 | Phase | Title | Status | Complete |
 |---|---|---|---|
-| **Phase 1** | Data Collection & Bronze Layer Setup | ✅ Done | 100% |
-| **Phase 2** | Silver Layer — Transformation, PII, Quality | ✅ Done | 100% |
+| **Phase 1** | Data Collection & Bronze Layer Setup | ⏳ In Progress (Databricks Live Verification Pending) | 90% |
+| **Phase 2** | Silver Layer — Transformation, PII, Quality | ⏳ In Progress (Databricks Live Verification Pending) | 90% |
 | **Phase 3** | Gold Layer — Star Schema & BI Analytics | 🔲 Not started | 0% |
 | **Phase 4** | Visualizations & Final Report | 🔲 Not started | 0% |
 
+> ⚠️ **Verification Notice:** All local unit, mock, and offline PySpark tests are passing. However, **Databricks live cluster verification is NOT marked complete** and remains strictly pending until executed against a live Databricks Serverless workspace with Unity Catalog.
+
 ---
 
-## ✅ Phase 1 — Data Collection & Bronze Layer (COMPLETE)
+## ⏳ Phase 1 — Data Collection & Bronze Layer (Local Complete, Databricks Verification Pending)
 
 ### 1.1 GitHub API Ingestion
-- [x] **`full_load.py`** — Full historical ingest for all 10 repos (2026-04-01 → present)
-- [x] **`scripts/fetch_incremental.py`** — Incremental fetch with `--since`, `--repos`, `--dry-run`, rate-limit handling, `updated_at` stop for pulls
+- [ ] **`notebooks/00_ingest_github_api.py`** — Databricks in-workspace ingestion (implemented, NOT yet verified on Databricks)
+- [x] **`src/ingestion/github_client.py`** — Pure Python GitHub client with pagination, exponential retry, rate-limit backoff, token secrecy, atomic write (all unit tests passing)
+- [x] **`full_load.py`** — Full historical ingest for all 10 repos (local fallback script)
+- [x] **`scripts/fetch_incremental.py`** — Incremental fetch with `--since`, `--repos`, `--dry-run`, rate-limit handling (local fallback script)
 - [x] **`fetch_samples.py`** — 5-record slice samples for local testing
 - [x] **10 repos × 5 entities** = 50 JSON files collected in `bronze/`
 - [x] Pagination resilience verified (Milvus page 15, Chroma pages 6 & 9 retried successfully)
@@ -134,7 +137,8 @@
 - [x] Deterministic deduplication tie-breaking via SHA-256 on `_raw_record`
 - [x] Drift column name sanitization (`^[A-Za-z_][A-Za-z0-9_]*$`), reserved column collisions, and 25-key cap (`discover_drift_keys`, `evolve_table_schema`)
 
-#### Verified on Databricks (Requires live Databricks runtime & Delta Lake engine)
+#### Verified on Databricks (Requires live Databricks runtime & Delta Lake engine — ALL PENDING)
+- [ ] In-workspace GitHub API ingestion verification on live Databricks Serverless (`notebooks/00_ingest_github_api.py`)
 - [ ] Live Delta Lake table MERGE INTO operations (`merge_delta`)
 - [ ] Disk-level schema evolution via `ALTER TABLE ... ADD COLUMNS` on live Delta tables
 - [ ] Unity Catalog Volume storage reads (`/Volumes/<catalog>/<schema>/<volume>/...`)
@@ -222,10 +226,20 @@ for BI queries and cross-repo trend analysis.
 - [ ] Upload `bronze/` folder to Unity Catalog Volume at `/Volumes/workspace/bronze_data/raw/`
 - [ ] Create Databricks Secrets scope: `databricks secrets create-scope --scope dbtrends`
 - [ ] Store PII salt: `databricks secrets put --scope dbtrends --key salt --string-value <random-hex>`
+- [ ] Store GitHub token: `databricks secrets put --scope dbtrends --key github_token --string-value <github-token>`
 - [ ] Import notebooks into Databricks via Git Folder
 - [ ] Run `01_setup.py` once to create all Delta tables
 - [ ] Run `04_run_pipeline.py` Section A (standard incremental run)
 - [ ] Run `04_run_pipeline.py` Section C (drift test) after uploading `samples/drift/`
+
+### NEEDS DATABRICKS VERIFICATION (`notebooks/00_ingest_github_api.py`)
+The ingestion notebook is fully implemented and tested locally with mocked HTTP and PySpark integration tests. The following steps require execution in a live Databricks Serverless workspace:
+- [ ] **1. Pre-flight quota probe:** Pre-flight cell prints status 200 and a rate-limit number from a serverless notebook (`GET https://api.github.com/rate_limit`).
+- [ ] **2. Single entity full load:** `repo=surrealdb/surrealdb`, `entity=releases`, `run_mode=full`: writes `/Volumes/workspace/bronze_data/raw_api/surrealdb_surrealdb/releases.json`; record count roughly equals the 150 verified earlier (may be higher if new releases appeared).
+- [ ] **3. End-to-end full load & Bronze ingest:** `repo=surrealdb/surrealdb`, `entity=ALL`, `run_mode=full` -> run `02_raw_to_bronze` with `base_path=/Volumes/workspace/bronze_data/raw_api` against a scratch catalog/schema or after confirming it will not overwrite verified tables; status SUCCESS for all 5 entities.
+- [ ] **4. Multi-repo incremental ingest:** `run_mode=incremental`, `since=<recent date>`, `repo=ALL`: files land under `<landing_root>/<batch_id>/...`, and `02_raw_to_bronze` with `base_path=<landing_root>/<batch_id>` loads them (inserted/updated counts plausible).
+- [ ] **5. Audit log compliance:** `ops.pipeline_execution_logs` contains `layer='INGEST'` rows with SUCCESS/FAILURE only and no token text: `SELECT * FROM workspace.ops.pipeline_execution_logs WHERE layer='INGEST'`.
+- [ ] **6. Interruption resumption:** Interrupt an in-flight run and re-run with `skip_existing=true`: completed entities are skipped with status SUCCESS and message `SKIPPED_EXISTING`.
 
 ### Screenshots (15 required, 5 optional)
 - [ ] 01–15 from `docs/screenshots/CHECKLIST.md` — must-have

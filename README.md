@@ -16,6 +16,7 @@
 6. [Silver Data Dictionary](#6-silver-data-dictionary)
 7. [Ops Tables](#7-ops-tables)
 8. [Databricks Execution Guide](#8-databricks-execution-guide)
+   - [8.7 Ingestion (API -> Volume) on Databricks](#87-ingestion-api---volume-on-databricks)
 9. [Idempotency](#9-idempotency)
 10. [Schema Drift Handling](#10-schema-drift-handling)
 11. [PII Handling](#11-pii-handling)
@@ -571,6 +572,78 @@ When running `02` or `03` standalone outside `04`:
 1. Run locally: `python scripts/make_drift_sample.py`
 2. Upload `samples/drift/` to `/Volumes/workspace/bronze_data/raw/drift/driftlab_surrealdb/`
 3. Run Section C of `04_run_pipeline.py` (reads from isolated pseudo-repo `driftlab/surrealdb` and automatically cleans up test rows from bronze and silver)
+
+---
+
+### 8.7 Ingestion (API -> Volume) on Databricks: Notebook 00 (`00_ingest_github_api.py`)
+
+Notebook `notebooks/00_ingest_github_api.py` provides automated in-workspace data extraction directly from the GitHub REST API into Unity Catalog Volumes on Databricks Serverless compute. It removes the necessity of running external workstation ingestion scripts, while enforcing rate-limit governance, token secrecy, atomic persistence, and pipeline audit logging.
+
+#### 8.7.1 Notebook 00 Parameters and Widgets
+
+The notebook defines 11 configurable widgets:
+
+| Widget | Default Value | Description |
+|---|---|---|
+| `catalog` | `workspace` | Target Unity Catalog name (used for audit logging). |
+| `repo` | `ALL` | Target repository: either `owner/repo`, `owner_repo`, or `ALL` (expands to all 10 tracked database repositories). |
+| `entity` | `ALL` | Target entity: `commits`, `issues`, `pulls`, `releases`, `repo_metadata`, or `ALL`. |
+| `run_mode` | `full` | Execution mode: `full`, `incremental`, or `backfill`. Controls windowing, sort direction, and volume landing directories. |
+| `since` | *(empty)* | Lower timestamp bound (ISO-8601 or `YYYY-MM-DD`). In `full` mode, empty defaults to `2026-04-01T00:00:00Z`. In incremental mode, empty signifies unbounded. |
+| `until` | *(empty)* | Upper timestamp bound (ISO-8601 or `YYYY-MM-DD`, empty = unbounded). |
+| `batch_id` | *(empty)* | Pipeline run identifier (empty = auto-generated `batch_YYYYMMDD_HHMMSS`). |
+| `out_root` | `/Volumes/workspace/bronze_data/raw_api` | Destination Volume directory root for `full` mode runs. **Default protects the verified baseline dataset.** |
+| `landing_root` | `/Volumes/workspace/bronze_data/incremental` | Destination Volume directory root for `incremental` or `backfill` runs. |
+| `github_token` | *(empty)* | Optional token fallback for interactive development (Databricks Secret scope `dbtrends` preferred). |
+| `skip_existing` | `false` | When set to `true`, skips downloading entities whose target JSON file already exists on the Volume, logging status `SUCCESS` with message `SKIPPED_EXISTING`. Enables seamless resumption after network interruptions. |
+
+#### 8.7.2 Full vs Incremental Ingestion Modes
+
+| Aspect | Full Mode (`run_mode='full'`) | Incremental Mode (`run_mode='incremental'`) | Backfill Mode (`run_mode='backfill'`) |
+|---|---|---|---|
+| **Primary Purpose** | Complete baseline snapshot extraction. | Ongoing delta ingestion for new activity. | Targeted historical repair for specific date windows. |
+| **Output Path** | `<out_root>/<slug>/<entity>.json`<br>*(e.g. `/Volumes/workspace/bronze_data/raw_api/postgres_postgres/commits.json`)* | `<landing_root>/<batch_id>/<slug>/<entity>.json`<br>*(e.g. `/Volumes/workspace/bronze_data/incremental/batch_20261010_120000/postgres_postgres/commits.json`)* | `<landing_root>/<batch_id>/<slug>/<entity>.json` |
+| **Default `since`** | Defaults to `2026-04-01T00:00:00Z` if empty. | Unbounded if empty (caller typically supplies a recent ISO timestamp). | User-specified boundary. |
+| **Pull Requests Sort** | `sort=created&direction=desc`<br>Cutoff evaluated against `created_at`. | `sort=updated&direction=desc`<br>Cutoff evaluated against `updated_at`. | `sort=updated&direction=desc`<br>Client-side filtering against `updated_at <= until`. |
+| **Target Volume** | Isolated in `raw_api/`. | Partitioned per unique `batch_id` folder. | Partitioned per unique `batch_id` folder. |
+
+#### 8.7.3 The `raw_api` Folder Architecture & Safety Isolation
+
+To prevent accidental data loss or silent regressions:
+1. **Baseline Protection:** The verified baseline dataset used by the academic evaluation resides in `/Volumes/workspace/bronze_data/raw/`.
+2. **Dedicated Ingestion Landing:** Notebook 00 defaults `out_root` to `/Volumes/workspace/bronze_data/raw_api/`. Under no circumstances should automated runs overwrite `raw/` directly.
+3. **Controlled Validation:** When testing new full-load extracts from the GitHub API, raw files land under `raw_api/`. Engineers can run `notebooks/02_raw_to_bronze.py` with `base_path=/Volumes/workspace/bronze_data/raw_api` targeting a staging or scratch catalog to inspect row counts, schema stability, and data quality before replacing production baseline files.
+
+#### 8.7.4 Error Handling, Rate Limiting & Retry Mechanics
+
+1. **Pre-Flight Quota Probe:** Before making entity calls, Notebook 00 queries `https://api.github.com/rate_limit`, computes estimated consumption across all requested repos and entities, and fails fast if the remaining quota is insufficient.
+2. **Rate Limit Backoff:** During pagination, if fewer than 3 calls remain (`X-RateLimit-Remaining <= 2`), the client sleeps until the reset timestamp (+2s safety margin). It also respects HTTP 429 and HTTP 403 `Retry-After` headers.
+3. **Retry Budget:**
+   - `paginate()` and `paginate_pulls()` provide exponential backoff over transient HTTP 5xx errors and network failures.
+   - On rate limits (HTTP 429 or HTTP 403 rate limit), retries are bounded by the retry budget (`max_retries=3`). On the final attempt, the client raises `GitHubFetchError("Rate limit / retries exhausted on <url>")` rather than continuing or returning a partial list.
+   - `repo_metadata` includes a 3-attempt retry loop with exponential backoff for transient failures.
+4. **Atomic Writes:** All JSON outputs are written via `write_json_atomic()` to a `.tmp` file, synced to disk, and atomically renamed via `os.replace` (with `shutil.move` fallback for volume drivers), ensuring no partial or corrupted JSON remains on failure.
+5. **Token Secrecy:** Tokens are scrubbed from all stdout, stderr, exception messages, and execution log rows via `_sanitize()`.
+
+#### 8.7.5 GitHub Token Setup
+
+Tokens are resolved in strict priority order:
+1. **Databricks Secret (Recommended):** `dbutils.secrets.get("dbtrends", "github_token")`
+2. **Notebook Widget:** `dbutils.widgets.get("github_token")`
+3. **Environment Variable:** `GITHUB_TOKEN`
+
+To configure via Databricks CLI:
+```bash
+databricks secrets create-scope --scope dbtrends
+databricks secrets put --scope dbtrends --key github_token --string-value "ghp_..."
+```
+
+#### 8.7.6 Feeding Ingestion Output into Downstream Notebooks
+
+1. **Full Load Validation:** In `notebooks/02_raw_to_bronze.py`, set widget `base_path` to `/Volumes/workspace/bronze_data/raw_api`.
+2. **Incremental Batch Ingestion:** Set `base_path` in `02_raw_to_bronze.py` to `<landing_root>/<batch_id>`.
+3. **End-to-End Orchestrator:** In `notebooks/04_run_pipeline.py`, set widget `run_ingestion` to `true`. Section A triggers `00_ingest_github_api` in incremental mode, outputs a fresh batch directory, and cascades that batch through Bronze and Silver automatically.
+4. **Workstation Fallbacks:** `full_load.py` and `scripts/fetch_incremental.py` remain available as local command-line alternatives for environments lacking direct outbound internet egress.
 
 ---
 

@@ -18,6 +18,8 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
+from src.ingestion.github_client import repo_dir_slug, repo_full_name_of
+
 try:
     from pyspark.sql import DataFrame, SparkSession
     from pyspark.sql import functions as F
