@@ -17,11 +17,17 @@
 7. [Ops Tables](#7-ops-tables)
 8. [Databricks Execution Guide](#8-databricks-execution-guide)
    - [8.7 Ingestion (API -> Volume) on Databricks](#87-ingestion-api---volume-on-databricks)
-9. [Idempotency](#9-idempotency)
-10. [Schema Drift Handling](#10-schema-drift-handling)
-11. [PII Handling](#11-pii-handling)
-12. [Known Caveats](#12-known-caveats)
-13. [Screenshots Checklist](#13-screenshots-checklist)
+9. [How to Run the Pipeline](#9-how-to-run-the-pipeline)
+   - [9.1 Incremental Load (Section A)](#91-incremental-load-section-a)
+   - [9.2 Backfill of an Older Historical Period (Section B)](#92-backfill-of-an-older-historical-period-section-b)
+   - [9.3 Idempotency Proof (Section D)](#93-idempotency-proof-section-d)
+   - [9.4 Running Notebooks Standalone (02 & 03)](#94-running-notebooks-standalone-02_raw_to_bronzepy--03_bronze_to_silverpy)
+   - [9.5 Schema Drift End-to-End Test (Section C)](#95-schema-drift-end-to-end-test-section-c)
+10. [Idempotency & MERGE Strategy](#10-idempotency--merge-strategy)
+11. [Schema Drift Handling](#11-schema-drift-handling)
+12. [PII Handling](#12-pii-handling)
+13. [Known Caveats](#13-known-caveats)
+14. [Screenshots Checklist](#14-screenshots-checklist)
 
 ---
 
@@ -33,7 +39,7 @@ Databricks Serverless with Unity Catalog and Delta Lake.
 
 | Layer | Storage | Technology | Purpose |
 |---|---|---|---|
-| **Source** | GitHub REST API | `scripts/fetch_incremental.py` | Pull raw JSON |
+| **Source** | GitHub REST API | `scripts/fetch_incremental.py` / `notebooks/00_ingest_github_api.py` | Pull raw JSON |
 | **Bronze** | Unity Catalog Volume → Delta | `notebooks/02_raw_to_bronze.py` | Raw, schema-validated, idempotent |
 | **Silver** | Unity Catalog Delta tables | `notebooks/03_bronze_to_silver.py` | Typed, PII-masked, deduplicated |
 | **Gold** *(Phase 3)* | Unity Catalog Delta views | TBD | Star schema for BI/analytics |
@@ -80,33 +86,42 @@ flowchart TD
 ```
 dav-database-trends/
 ├── notebooks/
+│   ├── 00_ingest_github_api.py  # In-workspace GitHub REST API extraction
 │   ├── 01_setup.py              # Create UC schemas, Delta tables, ops tables
 │   ├── 02_raw_to_bronze.py      # Raw JSON → Bronze Delta (MERGE INTO)
 │   ├── 03_bronze_to_silver.py   # Bronze → Silver (PII, is_bot, quarantine)
-│   └── 04_run_pipeline.py       # Orchestrator (incremental / backfill / drift)
+│   └── 04_run_pipeline.py       # Orchestrator (incremental / backfill / drift / idempotency)
 ├── src/
 │   ├── schemas.py               # All explicit StructType schemas (Bronze + Silver + Ops)
-│   └── common.py                # Shared helpers: get_params, log_run, merge_delta, hash_email
+│   ├── common.py                # Shared helpers: get_params, log_run, merge_delta, hash_email
+│   └── ingestion/               # GitHub REST API client & helpers
+│       └── github_client.py
 ├── scripts/
 │   ├── full_load.py             # Historical full ingest → bronze/
+│   ├── fetch_samples.py         # 5-record slice samples for testing
 │   ├── fetch_incremental.py     # Incremental GitHub fetch → samples/incremental/
-│   └── make_drift_sample.py     # Inject schema-drift anomalies into samples/drift/
+│   ├── make_drift_sample.py     # Inject schema-drift anomalies into samples/drift/
+│   └── audit_bronze.py          # Bronze data quality audit script
 ├── samples/
 │   ├── *.json                   # 5-record full-load slice (one repo)
 │   ├── full_load/               # Full load samples (all entities)
 │   ├── incremental/             # Output of fetch_incremental.py
+│   ├── incremental_load/        # Incremental samples
 │   └── drift/                   # Output of make_drift_sample.py (drift test data)
-├── bronze/                      # Local raw JSON (gitignored in prod)
 ├── tests/
 │   ├── check_schemas.py         # Validate schema fields against real JSON records
 │   ├── test_schemas.py          # Unit tests for schema field coverage
-│   └── test_common.py           # Unit tests for common.py helpers
+│   ├── test_common.py           # Unit tests for common.py helpers
+│   ├── test_github_client.py    # Unit tests for GitHub client & pagination
+│   └── test_spark_logic.py      # Unit tests for PySpark parsing, timestamps, bots, drift
 ├── docs/
 │   ├── data_dictionary.md       # Full data dictionary (extended)
+│   ├── proof/                   # Proof of execution & rubric mapping
+│   │   └── README.md
 │   └── screenshots/             # Required Databricks screenshots (see checklist)
 ├── audit/
 │   ├── bronze_quality_report.md # Full Bronze DQ audit
-│   └── data_quality.md
+│   └── data_quality.md          # Bronze layer data quality audit report
 └── progress.md                  # Project progress tracker
 ```
 
@@ -136,7 +151,7 @@ All Bronze schemas are defined in [`src/schemas.py`](src/schemas.py) using expli
 Every Bronze table adds `repo_full_name`, `load_timestamp`, `_source_file`, and `batch_id`
 at ingest time. All Bronze schemas include `_corrupt_record` (StringType) for Spark PERMISSIVE mode.
 
-**Schema Drift Absorption:** Unexpected new top-level JSON fields are dynamically discovered via `discover_drift_keys` and absorbed into target Bronze tables as nullable `STRING` columns using explicit DDL (`ALTER TABLE <target> ADD COLUMNS (<col> STRING)`) prior to Delta `MERGE INTO`, preventing silent data loss.
+**Schema Drift Absorption:** Unexpected new top-level JSON fields are dynamically discovered via `discover_drift_keys` and absorbed into target Bronze tables as nullable `STRING` columns using explicit DDL (`ALTER TABLE <target> ADD COLUMNS (<col> STRING)`) prior to Delta `MERGE INTO`, preventing silent data loss. Note: Drift-absorbed columns (such as `new_field_test`) appear as nullable `STRING` columns in the evolved Delta table and are intentionally not part of the declared schema in [`src/schemas.py`](src/schemas.py).
 
 ### 5.1 `bronze.commits`
 Primary key: `(repo_full_name, sha)` · Date filter column: `commit.author.date`
@@ -471,19 +486,31 @@ The batch continues; no run is cancelled by quarantine events.
 | `layer` | STRING | ✗ | `"bronze"` or `"silver"` |
 | `entity` | STRING | ✗ | Source entity (`commits`, `issues`, etc.) |
 | `repo_full_name` | STRING | ✓ | Source repository |
-| `rejection_reason` | STRING | ✗ | E.g. `"_corrupt_record"`, `"type_mismatch: comments cannot cast to int"`, `"unparseable_date: created_at"`, `"null_primary_key"` |
+| `rejection_reason` | STRING | ✗ | Exact diagnostic failure reason (see taxonomy table below) |
 | `raw_payload` | STRING | ✓ | Serialized JSON of rejected record with all raw email addresses scrubbed (`[EMAIL]` masked) prior to storage and `quarantine_id` calculation |
 | `batch_id` | STRING | ✓ | Unique batch execution identifier |
 | `load_timestamp` | TIMESTAMP | ✗ | Quarantine write time |
 
 **Rejection reason taxonomy:**
 
-| Code | Trigger |
-|---|---|
-| `_corrupt_record` | Spark PERMISSIVE mode detected malformed JSON |
-| `null_primary_key` | PK field (`sha` / `id`) is null after parsing |
-| `type_mismatch: <field>` | Field cannot be cast to the Silver type |
-| `unparseable_date: <field>` | ISO-8601 timestamp parse failure |
+Every invalid or malformed row is routed to `ops.silver_quarantine` with an explicit rejection reason and the originating pipeline layer (`layer` column):
+
+| Layer | `rejection_reason` | Originating Trigger / Entity |
+|---|---|---|
+| `bronze` | `Corrupt or type-mismatched JSON record` | Spark `PERMISSIVE` mode detected malformed JSON or schema type mismatch (`_corrupt_record` is non-null). E.g. Anomaly B (`comments = "many"`). |
+| `bronze` | `Null primary key (sha)` | Commits record has null `sha` primary key after parsing. |
+| `bronze` | `Null primary key (id)` | Record has null `id` primary key for `issues`, `pulls`, `releases`, or `repo_metadata`. |
+| `bronze` | `Quarantined during Bronze ingestion` | Fallback rejection reason in `notebooks/02_raw_to_bronze.py` if `rejection_reason` column in rejected dataframe is null. |
+| `silver` | `Missing commit SHA primary key` | Commits row in Bronze has null `commit_sha` during Silver transformation. |
+| `silver` | `Unparseable commit timestamp (neither author date nor committer date valid)` | Commits row where neither `commit.author.date` nor `commit.committer.date` can be parsed as UTC timestamp. |
+| `silver` | `Missing issue_number or issue_id` | Issues row in Bronze has null `issue_number` or null `issue_id`. |
+| `silver` | `Unparseable created_at_utc timestamp` | Issues or Pull Requests row where `created_at` timestamp cannot be parsed as UTC timestamp. E.g. Anomaly C (`created_at = "not-a-date"`). |
+| `silver` | `Missing pr_number or pr_id` | Pull Requests row in Bronze has null `pr_number` or null `pr_id`. |
+| `silver` | `Missing release_id or tag_name` | Releases row in Bronze has null `release_id` or null `tag_name`. |
+| `silver` | `Unparseable published_at_utc timestamp` | Releases row where `published_at` timestamp cannot be parsed as UTC timestamp. |
+| `silver` | `Missing repo_id or repo_full_name` | Repository metadata row in Bronze has null `repo_id` or null `repo_full_name`. |
+| `silver` | `Unparseable updated_at_utc timestamp` | Repository metadata row where `updated_at` cannot be parsed as UTC timestamp. |
+| `silver` | `Constraint violation / null required field in silver_{entity}` | Fallback rejection reason in `notebooks/03_bronze_to_silver.py` for any unhandled Silver constraint failure. |
 
 ---
 
@@ -508,7 +535,7 @@ The batch continues; no run is cancelled by quarantine events.
 ```bash
 # Local: generate full-load Bronze data
 export GITHUB_TOKEN=ghp_...
-python full_load.py
+python scripts/full_load.py
 
 # Upload bronze/ to the Volume
 databricks fs cp -r bronze/ \
@@ -543,7 +570,7 @@ This creates:
 
 #### Orchestrator Notebook (`notebooks/04_run_pipeline.py`)
 
-The orchestrator defines 11 top-level widgets controlling all pipeline sections:
+The orchestrator defines 13 top-level widgets controlling all pipeline sections:
 
 | Widget | Default Value | Notes |
 |---|---|---|
@@ -558,20 +585,22 @@ The orchestrator defines 11 top-level widgets controlling all pipeline sections:
 | `backfill_repo` | `surrealdb/surrealdb` | Section B: target repository for backfill |
 | `backfill_since` | `2026-04-01T00:00:00Z` | Section B: backfill window start |
 | `backfill_until` | `2026-06-30T23:59:59Z` | Section B: backfill window end |
+| `salt` | *(empty)* | Optional PII salt fallback (used if no secret scope `dbtrends` key `salt`) |
+| `run_ingestion` | `false` | When set to `"true"`, triggers `./00_ingest_github_api` in incremental mode before Section A and sets `base_path` to the landed batch path |
 
 > **Unbounded Date Filtering:** For all date widgets (`since`, `until`, `incr_since`, `incr_until`, `backfill_since`, `backfill_until`), leaving the widget value empty (`""`) signifies **unbounded** (no temporal cutoff applied in that direction).
 
 #### Individual Execution Notebooks (`02_raw_to_bronze.py` & `03_bronze_to_silver.py`)
 
 When running `02` or `03` standalone outside `04`:
-- **`02_raw_to_bronze.py`**: `catalog`, `base_path`, `repo` (`ALL` or `owner/repo`), `entity` (`ALL` or entity name), `since`, `until`, `run_mode` (`full`, `incremental`, `backfill`), `batch_id`.
-- **`03_bronze_to_silver.py`**: `catalog`, `repo` (`ALL` or `owner/repo`), `since`, `until`, `run_mode` (`full`, `incremental`, `backfill`), `batch_id`, `salt`.
+- **`02_raw_to_bronze.py`**: `catalog`, `base_path`, `repo` (`ALL` or `owner/repo` / `owner_repo`), `entity` (`ALL` or entity name), `since`, `until`, `run_mode` (`full`, `incremental`, `backfill`), `batch_id`.
+- **`03_bronze_to_silver.py`**: `catalog`, `repo` (`ALL` or `owner/repo` / `owner_repo`), `since`, `until`, `run_mode` (`full`, `incremental`, `backfill`), `batch_id`, `salt`.
 
 #### Drift Test
 
-1. Run locally: `python scripts/make_drift_sample.py`
-2. Upload `samples/drift/` to `/Volumes/workspace/bronze_data/raw/drift/driftlab_surrealdb/`
-3. Run Section C of `04_run_pipeline.py` (reads from isolated pseudo-repo `driftlab/surrealdb` and automatically cleans up test rows from bronze and silver)
+1. Run locally: `python scripts/make_drift_sample.py` (generates `samples/drift/issues.json` with Anomalies A, B, C and `samples/drift/commits.json` with Anomaly A).
+2. Upload `samples/drift/issues.json` and `samples/drift/commits.json` to Volume path `/Volumes/workspace/bronze_data/raw/drift/driftlab_surrealdb/`.
+3. Run Section C of `04_run_pipeline.py`. It runs `02_raw_to_bronze.py` and `03_bronze_to_silver.py` against isolated pseudo-repo `driftlab/surrealdb`, asserts schema evolution, Bronze quarantine (3 rows), Silver quarantine (1 row), excludes PRs, logs drift keys, and automatically cleans up test rows from Bronze and Silver tables (C-5) while retaining quarantine and execution log rows.
 
 ---
 
@@ -643,11 +672,165 @@ databricks secrets put --scope dbtrends --key github_token --string-value "ghp_.
 1. **Full Load Validation:** In `notebooks/02_raw_to_bronze.py`, set widget `base_path` to `/Volumes/workspace/bronze_data/raw_api`.
 2. **Incremental Batch Ingestion:** Set `base_path` in `02_raw_to_bronze.py` to `<landing_root>/<batch_id>`.
 3. **End-to-End Orchestrator:** In `notebooks/04_run_pipeline.py`, set widget `run_ingestion` to `true`. Section A triggers `00_ingest_github_api` in incremental mode, outputs a fresh batch directory, and cascades that batch through Bronze and Silver automatically.
-4. **Workstation Fallbacks:** `full_load.py` and `scripts/fetch_incremental.py` remain available as local command-line alternatives for environments lacking direct outbound internet egress.
+4. **Workstation Fallbacks:** `scripts/full_load.py` and `scripts/fetch_incremental.py` remain available as local command-line alternatives for environments lacking direct outbound internet egress.
 
 ---
 
-## 9. Idempotency
+## 9. How to Run the Pipeline
+
+The pipeline is orchestrated from [`notebooks/04_run_pipeline.py`](notebooks/04_run_pipeline.py) on Databricks Serverless compute. The orchestrator calls [`02_raw_to_bronze.py`](notebooks/02_raw_to_bronze.py) and [`03_bronze_to_silver.py`](notebooks/03_bronze_to_silver.py) sequentially via `dbutils.notebook.run`.
+
+### 9.1 Incremental Load (Section A)
+
+**Purpose:** Executes standard nightly or periodic processing for all 10 tracked repositories and all 5 entities (`commits`, `issues`, `pulls`, `releases`, `repo_metadata`), ingesting delta changes and promoting them to Silver.
+
+**Widgets to Configure in `04_run_pipeline.py`:**
+
+| Widget | Example Value | Description |
+|---|---|---|
+| `incr_since` | `2026-09-25T00:00:00Z` | Lower bound timestamp cutoff (ISO-8601). Ingests records updated on or after this timestamp. |
+| `incr_until` | *(empty)* | Upper bound cutoff (ISO-8601). Empty string (`""`) signifies unbounded (no upper cutoff). |
+| `batch_id` | *(empty)* | Unique execution batch identifier. Leave empty to auto-generate `run_YYYYMMDDTHHMMSSZ_<hex>`. |
+| `run_ingestion` | `false` *(or `true`)* | Set to `"false"` to run Bronze/Silver over data already staged at `base_path`. Set to `"true"` to trigger `00_ingest_github_api` first in incremental mode, landing data into `/Volumes/workspace/bronze_data/incremental/<batch_id>_incr` and automatically redirecting `base_path` there. |
+| `base_path` | `/Volumes/workspace/bronze_data/raw` | Base Volume path where raw JSON folders are located. |
+| `catalog` | `workspace` | Target Unity Catalog name. |
+
+**Execution Order & Operations:**
+1. *(Optional Pre-Ingestion Hook)*: If `run_ingestion="true"`, runs `00_ingest_github_api` for all repos/entities with `run_mode="incremental"` and `since=incr_since`, landing fresh API extracts on the Volume.
+2. **Bronze Pass (A-2):** Iterates through all 10 repositories (`ALL_REPOS`) and all 5 entities (`ALL_ENTITIES`), invoking `02_raw_to_bronze.py`.
+   - Reads raw JSON with explicit schemas in `PERMISSIVE` mode.
+   - Detects schema drift and dynamically evolves Bronze Delta tables via `mergeSchema`.
+   - Routes corrupt records and null primary keys to `ops.silver_quarantine` with `layer='bronze'`.
+   - Deduplicates incoming records and executes idempotent Delta `MERGE INTO` into `bronze.<entity>`.
+   - Logs metrics (rows inserted, updated, status) to `ops.pipeline_execution_logs` with `layer='BRONZE'`.
+3. **Silver Pass (A-3):** Iterates through all 10 repositories, invoking `03_bronze_to_silver.py`.
+   - Reads Bronze tables for the window (`since` → `until`).
+   - Masks PII: hashes author/committer emails using salted SHA-256 (`get_salt()`); drops personal names.
+   - Sanitizes commit headlines; tags CI/CD bots (`is_bot`); disambiguates issues vs PRs (`pull_request IS NULL`).
+   - Enforces strict typing (`TimestampType`, `LongType`, `IntegerType`).
+   - Routes unparseable dates or missing keys to `ops.silver_quarantine` with `layer='silver'`.
+   - Idempotently merges into `silver.<entity>` on `(repo_full_name, <primary_key>)`.
+   - Logs execution metrics to `ops.pipeline_execution_logs` with `layer='SILVER'`.
+4. **Verification (A-4):** Calls `show_counts()` across all Bronze, Silver, and quarantine tables, and prints the last 10 rows of `ops.pipeline_execution_logs` via `show_logs()`.
+
+---
+
+### 9.2 Backfill of an Older Historical Period (Section B)
+
+**Purpose:** Re-process or repair an explicit historical time window for a single repository (e.g., following a transformation bug fix or delayed upstream data delivery) without touching other repositories.
+
+**Widgets to Configure in `04_run_pipeline.py`:**
+
+| Widget | Example Value | Description |
+|---|---|---|
+| `backfill_repo` | `surrealdb/surrealdb` | Target repository identifier (accepts `owner/repo` or `owner_repo`). |
+| `backfill_since` | `2026-04-01T00:00:00Z` | Historical start timestamp boundary (ISO-8601). |
+| `backfill_until` | `2026-06-30T23:59:59Z` | Historical end timestamp boundary (ISO-8601). |
+| `batch_id` | `backfill_surrealdb_q1` | Optional batch identifier (or leave empty for auto-generation). |
+
+**Execution & Safety Guarantees:**
+- **Zero Code Changes:** No notebook code or SQL queries need editing. Setting the three backfill widgets controls the entire execution window.
+- **Bronze Backfill Pass (B-2):** Runs `02_raw_to_bronze.py` for the designated repository across all 5 entities with `run_mode="backfill"`.
+- **Silver Backfill Pass (B-3):** Runs `03_bronze_to_silver.py` for the designated repository with `run_mode="backfill"`.
+- **Safe Re-runs via Delta MERGE:** Because all table writes use `MERGE INTO` keyed on `(repo_full_name, <primary_key>)`, running a backfill multiple times or overlapping with existing data will never duplicate records. Existing rows are safely updated and new historical rows are inserted.
+- **Verification (B-4):** Displays updated row counts and logs to `ops.pipeline_execution_logs` with parameter recording `mode=backfill`.
+
+---
+
+### 9.3 Idempotency Proof (Section D)
+
+**Purpose:** Rigorously proves that the pipeline's Delta `MERGE INTO` logic is idempotent. Running the exact same batch twice against the same data yields zero duplicate rows.
+
+**Procedure in `04_run_pipeline.py` (Section D):**
+1. **D-1 Configuration:** Targets repository `redis/redis` with window `INCR_SINCE` to `INCR_UNTIL` and a fixed batch identifier `f"{BATCH_ID}_idempotency_proof"`.
+2. **D-2 First Pass:** Executes `02_raw_to_bronze.py` (all 5 entities) and `03_bronze_to_silver.py`. Captures row counts from all 5 Bronze tables, all 5 Silver tables, and `ops.silver_quarantine`.
+3. **D-3 Second Pass:** Immediately re-executes `02_raw_to_bronze.py` and `03_bronze_to_silver.py` with the exact same parameters, batch ID, and input data. Captures row counts after the second pass.
+4. **D-4 Idempotency Assertion:** Compares table-by-table row counts between the first and second pass:
+   ```python
+   for key in counts_after_first:
+       assert counts_after_first[key] == counts_after_second[key]
+   ```
+   If any table row count increases or changes (`DELTA != 0`), it raises `AssertionError`.
+   When all table counts remain strictly unchanged, it prints:
+   `✓ IDEMPOTENCY CONFIRMED — all row counts are identical after second pass.`
+
+---
+
+### 9.4 Running Notebooks Standalone (`02_raw_to_bronze.py` & `03_bronze_to_silver.py`)
+
+Notebooks 02 and 03 can be run interactively or scheduled independently outside the orchestrator.
+
+#### Standalone `notebooks/02_raw_to_bronze.py`
+
+| Widget | Default Value | Accepted Format & Notes |
+|---|---|---|
+| `catalog` | `workspace` | Target Unity Catalog name |
+| `repo` | `surrealdb/surrealdb` | Single repo or `"ALL"`. **Format:** Accepts either `owner/repo` (e.g. `surrealdb/surrealdb`) or `owner_repo` (e.g. `surrealdb_surrealdb`), or `"ALL"` (runs all 10 tracked repositories). The code normalizes automatically via `repo_full_name = repo_slug if "/" in repo_slug else repo_slug.replace("_", "/", 1)`. |
+| `entity` | `commits` | Target entity: `"commits"`, `"issues"`, `"pulls"`, `"releases"`, `"repo_metadata"`, or `"ALL"`. |
+| `base_path` | `/Volumes/workspace/bronze_data/raw` | Base Volume storage path containing raw folders `<owner>_<repo>/<entity>.json`. |
+| `since` | *(empty)* | Lower timestamp cutoff (ISO-8601; empty string = unbounded). |
+| `until` | *(empty)* | Upper timestamp cutoff (ISO-8601; empty string = unbounded). |
+| `batch_id` | *(empty)* | Batch identifier (empty = auto-generated). |
+| `run_mode` | `full` | Execution mode: `"full"`, `"incremental"`, or `"backfill"`. |
+
+#### Standalone `notebooks/03_bronze_to_silver.py`
+
+| Widget | Default Value | Accepted Format & Notes |
+|---|---|---|
+| `catalog` | `workspace` | Target Unity Catalog name |
+| `repo` | `surrealdb/surrealdb` | Single repo or `"ALL"`. **Format:** Accepts `owner/repo` (e.g. `surrealdb/surrealdb`) or `owner_repo` (e.g. `surrealdb_surrealdb`), or `"ALL"`. Normalized automatically by the execution loop. |
+| `since` | *(empty)* | Lower timestamp cutoff (ISO-8601; empty string = unbounded). |
+| `until` | *(empty)* | Upper timestamp cutoff (ISO-8601; empty string = unbounded). |
+| `batch_id` | *(empty)* | Batch identifier (empty = auto-generated). |
+| `run_mode` | `full` | Execution mode: `"full"`, `"incremental"`, or `"backfill"`. |
+| `salt` | *(empty)* | PII salt string (used if secret scope `dbtrends` key `salt` is not configured). |
+
+---
+
+### 9.5 Schema Drift End-to-End Test (Section C)
+
+**Purpose:** Validates that incoming schema changes (new unexpected fields, corrupt types, malformed dates) are absorbed or quarantined without crashing the pipeline.
+
+**Derived Volume Staging Path:**
+In `04_run_pipeline.py`, the drift path is built dynamically from `BASE_PATH`:
+- `BASE_PATH = dbutils.widgets.get("base_path")` *(default: `/Volumes/workspace/bronze_data/raw`)*
+- `C_DRIFT_PATH = f"{BASE_PATH}/drift"`
+- `C_REPO = "driftlab/surrealdb"` *(slug: `driftlab_surrealdb`)*
+- Target file path checked in C-1: `{C_DRIFT_PATH}/driftlab_surrealdb/{entity}.json`
+
+Therefore, with default `base_path`, drift sample files must be staged at:
+```text
+/Volumes/workspace/bronze_data/raw/drift/driftlab_surrealdb/
+```
+
+**Step-by-Step Procedure:**
+1. **Generate Drift Samples Locally:**
+   ```bash
+   python scripts/make_drift_sample.py
+   ```
+   Outputs:
+   - `samples/drift/issues.json` (5 records with Anomalies A, B, and C)
+   - `samples/drift/commits.json` (5 records with Anomaly A)
+2. **Upload to Volume:**
+   Upload both files to `/Volumes/workspace/bronze_data/raw/drift/driftlab_surrealdb/` via Databricks Catalog Explorer or Databricks CLI:
+   ```bash
+   databricks fs cp -r samples/drift/ dbfs:/Volumes/workspace/bronze_data/raw/drift/driftlab_surrealdb/
+   ```
+3. **Run Section C in `04_run_pipeline.py`:**
+   - **C-1:** Validates pre-requisite file presence.
+   - **C-2:** Runs `02_raw_to_bronze.py` for `driftlab/surrealdb` with `base_path=C_DRIFT_PATH`. Absorbs `new_field_test` into `bronze.issues` and `bronze.commits` schemas via `evolve_table_schema`. Quarantines the 3 type-corrupted records (`comments = "many"`) into `ops.silver_quarantine` with `layer='bronze'`.
+   - **C-3:** Runs `03_bronze_to_silver.py`. Excludes pull requests from issues (`pull_request IS NULL`). Quarantines the 1 unparseable date record (`created_at = "not-a-date"`) into `ops.silver_quarantine` with `layer='silver'`.
+   - **C-4b Assertions:** Asserts that:
+     1. Column `new_field_test` exists in `bronze.issues` and `bronze.commits`.
+     2. Exactly 3 rows are in `ops.silver_quarantine` with `layer='bronze'` and `entity='issues'`.
+     3. At least 1 row is in `ops.silver_quarantine` with `layer='silver'` and `entity='issues'`.
+     4. `ops.pipeline_execution_logs` records drift keys containing `new_field_test`.
+   - **C-5 Automated Cleanup:** Deletes test records for `driftlab/surrealdb` from `bronze.issues`, `bronze.commits`, `silver.issues`, `silver.commits`, and `silver.pull_requests`. All quarantine rows and log entries are retained for grading inspection.
+   - **C-6 Regression Guard:** Runs a normal load for `redis/redis` against the evolved `issues` table to verify schema evolution did not impair normal processing.
+
+---
+
+## 10. Idempotency & MERGE Strategy
 
 Every write in the pipeline uses **Delta `MERGE INTO`**, never `INSERT` or
 `DataFrame.write.append` after table creation.
@@ -665,22 +848,28 @@ Every write in the pipeline uses **Delta `MERGE INTO`**, never `INSERT` or
   ✓ PASS: workspace.bronze.commits        count=414 (unchanged)
   ✓ PASS: workspace.silver.commits        count=414 (unchanged)
   ...
-  ✓ IDEMPOTENCY CONFIRMED
+  ✓ IDEMPOTENCY CONFIRMED — all row counts are identical after second pass.
 ```
 
 ---
 
-## 10. Schema Drift Handling
+## 11. Schema Drift Handling
 
 The Bronze notebook (`02_raw_to_bronze.py`) reads JSON with `PERMISSIVE` mode and
 an explicit schema. When the API adds new fields not in the schema:
 
 1. **Detection:** Extra columns are identified by comparing `df.columns` against
    the declared schema fields; drift is logged in `ops.pipeline_execution_logs.error_message`.
-2. **Absorption:** Writes use `option("mergeSchema", "true")` so the new column is
-   added to the Delta table without failing the run.
-3. **Quarantine:** Rows with a non-null `_corrupt_record` (truly unparseable JSON)
-   are routed to `ops.silver_quarantine` with `rejection_reason = "_corrupt_record"`.
+2. **Absorption:** Schema evolution is applied via `evolve_table_schema` using explicit DDL (`ALTER TABLE <target> ADD COLUMNS (<col> STRING)`), adding new fields as nullable `STRING` columns without failing the run.
+3. **Quarantine:** Records failing structural validation are routed to `ops.silver_quarantine`:
+   - Malformed JSON or type-corrupted fields (e.g. string in integer count) are quarantined at the **Bronze layer** (`layer='bronze'`, `rejection_reason='Corrupt or type-mismatched JSON record'`).
+   - Unparseable date timestamps or missing primary keys are quarantined at the **Silver layer** (`layer='silver'`, `rejection_reason='Unparseable created_at_utc timestamp'`).
+   - Pull requests returned by the issues endpoint are excluded from `silver.issues` by design (`pull_request IS NULL`) and tracked in execution messages (`EXCLUDED_PRS: n`).
+
+**Volume Staging Path & Base Path Isolation:**
+- Default `base_path` in `04_run_pipeline.py` and `02_raw_to_bronze.py` is `/Volumes/workspace/bronze_data/raw`.
+- Drift samples are staged under `{base_path}/drift/driftlab_surrealdb/` (default: `/Volumes/workspace/bronze_data/raw/drift/driftlab_surrealdb/`).
+- Note: When testing live API extracts from Notebook 00, `out_root` defaults to `/Volumes/workspace/bronze_data/raw_api` to isolate experimental extracts from the baseline dataset in `raw/`.
 
 **Test this end-to-end:**
 
@@ -690,20 +879,25 @@ python scripts/make_drift_sample.py
 # Output: samples/drift/issues.json  (anomalies A, B, C)
 #         samples/drift/commits.json (anomaly A only)
 
-# 2. Upload to Volume then run Section C of 04_run_pipeline.py
+# 2. Upload to Volume path:
+#    dbfs:/Volumes/workspace/bronze_data/raw/drift/driftlab_surrealdb/
+# 3. Run Section C of 04_run_pipeline.py
 ```
 
 Anomalies injected by `make_drift_sample.py`:
 
 | Anomaly | Scope | Effect in Pipeline |
 |---|---|---|
-| **A** — `new_field_test` added to all records | issues + commits | Bronze logs drift, mergeSchema evolves table |
-| **B** — `comments = "many"` (string, not int) on 3 records | issues only | Silver quarantines 3 rows (`type_mismatch`) |
-| **C** — `created_at = "not-a-date"` on 1 record | issues only | Silver quarantines 1 row (`unparseable_date`) |
+| **A** — `new_field_test` added to all records | `issues` + `commits` | Bronze absorbs field via schema evolution (`ALTER TABLE ... ADD COLUMNS (new_field_test STRING)`), Delta table schema evolves |
+| **B** — `comments = "many"` (string, not int) on 3 records | `issues` only | **Bronze layer** quarantines 3 rows in `ops.silver_quarantine` with `layer='bronze'` and `rejection_reason='Corrupt or type-mismatched JSON record'` |
+| **C** — `created_at = "not-a-date"` on 1 record | `issues` only | Passes Bronze as STRING; **Silver layer** quarantines 1 row in `ops.silver_quarantine` with `layer='silver'` and `rejection_reason='Unparseable created_at_utc timestamp'` |
+| **Issue / PR Disambiguation** | `issues` | Records with non-null `pull_request` object are filtered out of `silver.issues` by design |
+
+Section C automatically verifies all 4 conditions via assertions in C-4b, then runs C-5 to clean up test rows from `bronze.*` and `silver.*` while retaining quarantine and execution log rows.
 
 ---
 
-## 11. PII Handling
+## 12. PII Handling
 
 Author and committer emails in `commits.json` are **direct PII** subject to GDPR/PDPA.
 
@@ -722,7 +916,7 @@ Author and committer emails in `commits.json` are **direct PII** subject to GDPR
 
 ---
 
-## 12. Known Caveats
+## 13. Known Caveats
 
 | # | Caveat | Repos Affected | Impact |
 |---|---|---|---|
@@ -737,7 +931,7 @@ Author and committer emails in `commits.json` are **direct PII** subject to GDPR
 
 ---
 
-## 13. Screenshots Checklist
+## 14. Screenshots Checklist
 
 Full checklist with priority, notebook/page, and what to show.
 See the companion file [`docs/screenshots/CHECKLIST.md`](docs/screenshots/CHECKLIST.md)
@@ -755,7 +949,7 @@ for exact instructions on each screenshot.
 | 8 | `08_bronze_table_schema.png` | ⭐ Must | Catalog Explorer → `bronze.commits` | Schema tab showing all column names and types |
 | 9 | `09_silver_table_schema.png` | ⭐ Must | Catalog Explorer → `silver.commits` | Schema tab — confirm `author_email_hash` present, no `email` column |
 | 10 | `10_row_counts_all_tables.png` | ⭐ Must | Databricks SQL | Query: `SELECT 'bronze.commits', COUNT(*) FROM bronze.commits UNION ALL ...` |
-| 11 | `11_incremental_run_widgets.png` | ⭐ Must | `04_run_pipeline.py` widget bar | All 6 widgets set to incremental run values |
+| 11 | `11_incremental_run_widgets.png` | ⭐ Must | `04_run_pipeline.py` widget bar | All 13 widgets set to incremental run values |
 | 12 | `12_backfill_run_widgets.png` | ⭐ Must | `04_run_pipeline.py` widget bar | Widgets set to backfill values (surrealdb, explicit since/until) |
 | 13 | `13_idempotency_proof.png` | ⭐ Must | `04_run_pipeline.py` — Section D | Console showing all `✓ PASS: ... count=N (unchanged)` lines |
 | 14 | `14_drift_test_bronze_schema_evolved.png` | ⭐ Must | Catalog → `bronze.issues` schema | `new_field_test` column visible after drift run |

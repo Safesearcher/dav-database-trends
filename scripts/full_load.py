@@ -4,7 +4,7 @@ Overwrites raw Bronze data in `bronze/` with a balanced 6-month historical windo
 Target Window: 2026-04-01T00:00:00Z to Present
 
 Usage:
-    python full_load.py YOUR_TOKEN
+    python scripts/full_load.py YOUR_TOKEN
 """
 
 import http.client
@@ -25,6 +25,8 @@ if hasattr(sys.stdout, "reconfigure"):
 TOKEN = sys.argv[1] if len(sys.argv) > 1 else None
 if not TOKEN:
     token_file = os.path.join(os.path.dirname(__file__), "github_api.txt")
+    if not os.path.exists(token_file):
+        token_file = os.path.join(os.path.dirname(__file__), "..", "github_api.txt")
     if os.path.exists(token_file):
         with open(token_file, "r", encoding="utf-8") as f:
             TOKEN = f.read().strip()
@@ -32,7 +34,7 @@ if not TOKEN:
         TOKEN = os.environ.get("GITHUB_TOKEN").strip()
 
 if not TOKEN:
-    print("Error: GitHub Token required. Usage: python full_load.py YOUR_TOKEN")
+    print("Error: GitHub Token required. Usage: python scripts/full_load.py YOUR_TOKEN")
     sys.exit(1)
 
 REPOS = [
@@ -50,7 +52,8 @@ REPOS = [
 
 SINCE_DATE = "2026-04-01T00:00:00Z"
 PER_PAGE = 100
-OUT_DIR = "bronze"
+WORKSPACE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+OUT_DIR = os.path.join(WORKSPACE_ROOT, "bronze")
 LINK_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 
 

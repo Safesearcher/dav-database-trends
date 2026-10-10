@@ -26,9 +26,9 @@
 ### 1.1 GitHub API Ingestion
 - [ ] **`notebooks/00_ingest_github_api.py`** — Databricks in-workspace ingestion (implemented, NOT yet verified on Databricks)
 - [x] **`src/ingestion/github_client.py`** — Pure Python GitHub client with pagination, exponential retry, rate-limit backoff, token secrecy, atomic write (all unit tests passing)
-- [x] **`full_load.py`** — Full historical ingest for all 10 repos (local fallback script)
+- [x] **`scripts/full_load.py`** — Full historical ingest for all 10 repos (local fallback script)
 - [x] **`scripts/fetch_incremental.py`** — Incremental fetch with `--since`, `--repos`, `--dry-run`, rate-limit handling (local fallback script)
-- [x] **`fetch_samples.py`** — 5-record slice samples for local testing
+- [x] **`scripts/fetch_samples.py`** — 5-record slice samples for local testing
 - [x] **10 repos × 5 entities** = 50 JSON files collected in `bronze/`
 - [x] Pagination resilience verified (Milvus page 15, Chroma pages 6 & 9 retried successfully)
 
@@ -97,7 +97,7 @@
 | `is_bot` flag (commits, issues, PRs) | ✅ | `src/common.py::bot_flag`, `notebooks/03` |
 | Issues: `pull_request IS NULL` filter | ✅ | `notebooks/03::transform_issues` |
 | Cassandra/MongoDB → 0 Silver issues (documented) | ✅ | `notebooks/03` comment + README |
-| Postgres → 0 Silver issues/PRs/releases (documented) | ✅ | README §12 |
+| Postgres → 0 Silver issues/PRs/releases (documented) | ✅ | README §13 |
 | Backfill: `since`/`until` filter by entity date column | ✅ | `notebooks/02`, `notebooks/03` |
 | Idempotency proof (run twice, assert counts unchanged) | ✅ | `notebooks/04` Section D |
 

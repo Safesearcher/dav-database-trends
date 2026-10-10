@@ -176,7 +176,7 @@ ORDER BY tbl;
 
 ---
 
-### 11 — Orchestrator Pipeline Widgets (11 Widgets)
+### 11 — Orchestrator Pipeline Widgets (13 Widgets)
 **File:** `11_incremental_run_widgets.png`  
 **Where:** `notebooks/04_run_pipeline.py` — widget bar at top
 
@@ -195,26 +195,29 @@ ORDER BY tbl;
 | `backfill_repo` | `surrealdb/surrealdb` |
 | `backfill_since` | `2026-04-01T00:00:00Z` |
 | `backfill_until` | `2026-06-30T23:59:59Z` |
+| `salt` | *(empty)* |
+| `run_ingestion` | `false` |
 
-**Capture:** The widget bar before running, with all 11 values configured as above.
+**Capture:** The widget bar before running, with all 13 values configured as above.
 
 ---
 
 ### 12 — Backfill Run Widgets
 **File:** `12_backfill_run_widgets.png`  
-**Where:** `notebooks/04_run_pipeline.py` — widget bar
+**Where:** `notebooks/04_run_pipeline.py` — widget bar (or standalone `02_raw_to_bronze.py` / `03_bronze_to_silver.py`)
 
-**Widget values to set:**
+**Widget values to set for Orchestrator Section B:**
 
 | Widget | Value |
 |---|---|
 | `catalog` | `workspace` |
 | `base_path` | `/Volumes/workspace/bronze_data/raw` |
-| `repo` | `surrealdb/surrealdb` |
-| `since` | `2026-04-01T00:00:00Z` |
-| `until` | `2026-06-30T23:59:59Z` |
-| `run_mode` | `backfill` |
-| `batch_id` | `backfill_surrealdb_q1fy26` |
+| `batch_id` | `backfill_surrealdb_q1fy26` *(or empty for auto)* |
+| `backfill_repo` | `surrealdb/surrealdb` |
+| `backfill_since` | `2026-04-01T00:00:00Z` |
+| `backfill_until` | `2026-06-30T23:59:59Z` |
+
+*(Note: When running standalone `02_raw_to_bronze.py` or `03_bronze_to_silver.py`, the corresponding widgets are `repo=surrealdb/surrealdb`, `since=2026-04-01T00:00:00Z`, `until=2026-06-30T23:59:59Z`, `run_mode=backfill`)*
 
 **Capture:** Widget bar showing the backfill configuration.
 

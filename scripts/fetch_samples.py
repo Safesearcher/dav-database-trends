@@ -7,7 +7,7 @@ per endpoint for the Phase 1 sample files). This script is meant to feed the
 actual Bronze layer.
 
 Usage:
-    python full_load.py YOUR_TOKEN
+    python scripts/fetch_samples.py YOUR_TOKEN
 
 Output:
     bronze/<owner>_<repo>/<entity>.json   (one folder per repo)
@@ -29,7 +29,17 @@ import urllib.request
 
 TOKEN = sys.argv[1] if len(sys.argv) > 1 else None
 if not TOKEN:
-    print("Usage: python full_load.py YOUR_TOKEN")
+    token_file = os.path.join(os.path.dirname(__file__), "github_api.txt")
+    if not os.path.exists(token_file):
+        token_file = os.path.join(os.path.dirname(__file__), "..", "github_api.txt")
+    if os.path.exists(token_file):
+        with open(token_file, "r", encoding="utf-8") as f:
+            TOKEN = f.read().strip()
+    elif os.environ.get("GITHUB_TOKEN"):
+        TOKEN = os.environ.get("GITHUB_TOKEN").strip()
+
+if not TOKEN:
+    print("Usage: python scripts/fetch_samples.py YOUR_TOKEN")
     sys.exit(1)
 
 REPOS = [
@@ -47,7 +57,8 @@ REPOS = [
 
 MAX_PAGES_PER_ENDPOINT = 20  # 20 pages x 100/page = up to 2,000 records/endpoint/repo
 PER_PAGE = 100
-OUT_DIR = "bronze"
+WORKSPACE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+OUT_DIR = os.path.join(WORKSPACE_ROOT, "bronze")
 
 LINK_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 

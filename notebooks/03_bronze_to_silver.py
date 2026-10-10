@@ -412,8 +412,14 @@ def run_silver_entity(
                 "excluded_prs": excluded_prs,
             }
 
+        messages = []
         if quarantined_count > 0:
-            run_ctx["message"] = f"PARTIAL_QUARANTINE: {quarantined_count}/{bronze_count} records quarantined"
+            messages.append(f"PARTIAL_QUARANTINE: {quarantined_count}/{bronze_count} records quarantined")
+        if entity == "issues" and excluded_prs > 0:
+            messages.append(f"EXCLUDED_PRS: {excluded_prs}")
+
+        if messages:
+            run_ctx["message"] = "; ".join(messages)
 
         # Idempotent MERGE INTO Silver Delta table
         inserted = 0

@@ -1,7 +1,6 @@
 # secrets
 .env
 *.token
-src/config/secrets.*
 
 # python
 __pycache__/
@@ -22,4 +21,8 @@ logs/
 # environment & secrets
 .salt
 .venv/
+
+# proofs
+!docs/proof/*.ipynb
+!docs/proof/*.html
 
