@@ -1,5 +1,8 @@
 # Databricks notebook source
-# COMMAND ----------
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 04 — Pipeline Orchestrator
 # MAGIC
@@ -19,9 +22,11 @@
 # MAGIC and asserts that Silver and Bronze counts are unchanged after the second pass.
 
 # COMMAND ----------
+
 # MAGIC %md ## ── Global Widgets & Helpers ──
 
 # COMMAND ----------
+
 dbutils.widgets.text("catalog",        "workspace",                         "Unity Catalog Name")
 dbutils.widgets.text("base_path",      "/Volumes/workspace/bronze_data/raw", "Volume Base Path")
 dbutils.widgets.text("batch_id",       "",                                   "Batch ID (empty = auto)")
@@ -39,6 +44,7 @@ dbutils.widgets.text("salt", "", "PII salt (used if no secret scope)")
 dbutils.widgets.dropdown("run_ingestion", "false", ["false", "true"], "Run GitHub API Ingestion before Section A")
 
 # COMMAND ----------
+
 import uuid
 from datetime import datetime, timezone
 
@@ -78,6 +84,7 @@ print(f"  NB_03     : {NB_03}")
 print(f"  timeout   : {TIMEOUT}s")
 
 # COMMAND ----------
+
 # Helper: run a single notebook, return its exit value, and print timing
 def run_nb(path, params, timeout=TIMEOUT):
     """Thin wrapper around dbutils.notebook.run with timing and error surfacing."""
@@ -90,6 +97,7 @@ def run_nb(path, params, timeout=TIMEOUT):
     return result
 
 # COMMAND ----------
+
 # Helper: show row counts for all Silver tables + Bronze tables
 def show_counts(label=""):
     print(f"\n{'='*70}")
@@ -109,6 +117,7 @@ def show_counts(label=""):
                 print(f"  {schema}.{tbl:<30}  [not found: {e}]")
 
 # COMMAND ----------
+
 # Helper: print last 10 rows of ops.pipeline_execution_logs
 def show_logs(label="", n=10):
     print(f"\n{'─'*70}")
@@ -123,11 +132,13 @@ def show_logs(label="", n=10):
         print(f"  [logs table not found or empty: {e}]")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### Pre-flight: Validate Salt Configuration
 # MAGIC Ensures that PII salt is resolvable (via secrets, widget, or environment variable) before running pipeline notebooks.
 
 # COMMAND ----------
+
 import sys
 import os
 
@@ -144,6 +155,7 @@ except Exception as _salt_err:
     raise ValueError(f"Pre-flight failed: {_salt_err}")
 
 # COMMAND ----------
+
 # ── Optional Pre-Ingestion Hook ─────────────────────────────────────────────
 # When widget run_ingestion is "true", runs ./00_ingest_github_api in incremental mode
 # and points Section A's Bronze run to the landed batch path.
@@ -165,6 +177,7 @@ if dbutils.widgets.get("run_ingestion").strip().lower() in ("true", "1", "yes"):
     print(f"[Ingestion Hook] Pointing Section A Bronze run to base_path: {BASE_PATH}")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ---
 # MAGIC ## ══════════════════════════════════════════════════════
@@ -174,6 +187,7 @@ if dbutils.widgets.get("run_ingestion").strip().lower() in ("true", "1", "yes"):
 # MAGIC `since` for all 10 repos and all 5 entities, then promotes to Silver.
 
 # COMMAND ----------
+
 # ── A-1 : Configure incremental window ──────────────────────────────────────
 # Dates driven by widgets 'incr_since' and 'incr_until' set in the widget bar above.
 A_SINCE     = INCR_SINCE          # widget: incr_since  (e.g. 2026-09-25T00:00:00Z)
@@ -188,6 +202,7 @@ print(f"  run_mode  : {A_RUN_MODE}")
 print(f"  batch_id  : {A_BATCH_ID}")
 
 # COMMAND ----------
+
 # ── A-2 : Bronze pass — all repos × all entities ─────────────────────────────
 print(f"\n[A-2] Bronze — all repos")
 for repo in ALL_REPOS:
@@ -204,6 +219,7 @@ for repo in ALL_REPOS:
         })
 
 # COMMAND ----------
+
 # ── A-3 : Silver pass — promote all repos ────────────────────────────────────
 print(f"\n[A-3] Silver — all repos")
 for repo in ALL_REPOS:
@@ -217,11 +233,13 @@ for repo in ALL_REPOS:
     })
 
 # COMMAND ----------
+
 # ── A-4 : Verification ───────────────────────────────────────────────────────
 show_counts("after SECTION A — STANDARD INCREMENTAL RUN")
 show_logs("after SECTION A", n=10)
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ---
 # MAGIC ## ══════════════════════════════════════════════════════
@@ -232,6 +250,7 @@ show_logs("after SECTION A", n=10)
 # MAGIC delayed data from the API.
 
 # COMMAND ----------
+
 # ── B-1 : Configure backfill window ─────────────────────────────────────────
 # All three values driven by widgets: backfill_repo, backfill_since, backfill_until.
 B_REPO      = BACKFILL_REPO        # widget: backfill_repo
@@ -248,6 +267,7 @@ print(f"  run_mode  : {B_RUN_MODE}")
 print(f"  batch_id  : {B_BATCH_ID}")
 
 # COMMAND ----------
+
 # ── B-2 : Bronze pass — one repo, all entities ───────────────────────────────
 print(f"\n[B-2] Bronze backfill — {B_REPO}")
 for entity in ALL_ENTITIES:
@@ -263,6 +283,7 @@ for entity in ALL_ENTITIES:
     })
 
 # COMMAND ----------
+
 # ── B-3 : Silver pass — one repo ─────────────────────────────────────────────
 print(f"\n[B-3] Silver backfill — {B_REPO}")
 run_nb(NB_03, {
@@ -275,11 +296,13 @@ run_nb(NB_03, {
 })
 
 # COMMAND ----------
+
 # ── B-4 : Verification ───────────────────────────────────────────────────────
 show_counts(f"after SECTION B — BACKFILL {B_REPO} [{B_SINCE} → {B_UNTIL}]")
 show_logs("after SECTION B", n=10)
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ---
 # MAGIC ## ══════════════════════════════════════════════════════
@@ -297,6 +320,7 @@ show_logs("after SECTION B", n=10)
 # MAGIC `samples/drift/` to the Volume at `{base_path}/drift/driftlab_surrealdb/`.
 
 # COMMAND ----------
+
 # ── C-1 : Configure drift test ───────────────────────────────────────────────
 C_REPO        = "driftlab/surrealdb"
 C_SINCE       = "2026-01-01T00:00:00Z"   # wide window — catches all drift records
@@ -320,6 +344,7 @@ for entity in ("issues", "commits"):
         print(f"    ✗ MISSING: {path}  ← run make_drift_sample.py then upload")
 
 # COMMAND ----------
+
 # ── C-2 : Bronze pass using drift data ──────────────────────────────────────
 # Point base_path to the drift folder so notebook 02 reads the injected files
 print(f"\n[C-2] Bronze (drift) — issues & commits for {C_REPO}")
@@ -336,6 +361,7 @@ for entity in ("issues", "commits"):
     })
 
 # COMMAND ----------
+
 # ── C-3 : Silver pass — expect quarantine rows ───────────────────────────────
 print(f"\n[C-3] Silver (drift) — {C_REPO}")
 run_nb(NB_03, {
@@ -348,6 +374,7 @@ run_nb(NB_03, {
 })
 
 # COMMAND ----------
+
 # ── C-4 : Verification ───────────────────────────────────────────────────────
 show_counts("after SECTION C — DRIFT TEST")
 show_logs("after SECTION C", n=10)
@@ -400,6 +427,7 @@ silver_q.select(
 ).show(10, truncate=100)
 
 # COMMAND ----------
+
 # ── C-5 : Cleanup drift data from bronze/silver tables ───────────────────────
 print(f"\n[C-5] Cleanup {C_REPO} rows from Bronze and Silver")
 for tbl in ["issues", "commits"]:
@@ -417,6 +445,7 @@ for tbl in ["issues", "commits", "pull_requests"]:
 print(f"  ✓ Cleaned up any rows for {C_REPO} from bronze and silver (quarantine and execution logs retained)")
 
 # COMMAND ----------
+
 # ── C-6 : Regression Guard — Normal Bronze Load After Drift ──────────────────
 print(f"\n[C-6] Regression guard: Normal Bronze load after drift schema evolution")
 # Runs a standard Bronze load on an evolved table (issues for redis/redis) without drift
@@ -433,6 +462,7 @@ run_nb(NB_02, {
 print("  ✓ Regression guard passed: normal load succeeded against evolved table")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ---
 # MAGIC ## ══════════════════════════════════════════════════════
@@ -443,6 +473,7 @@ print("  ✓ Regression guard passed: normal load succeeded against evolved tabl
 # MAGIC both passes.  This proves the `MERGE INTO` logic is truly idempotent.
 
 # COMMAND ----------
+
 # ── D-1 : Configure idempotency test ────────────────────────────────────────
 # Reuses the same incremental window so the proof runs on real fetched data.
 # D_REPO is intentionally hardcoded to a single repo to keep the proof fast.
@@ -474,6 +505,7 @@ print(f"  since     : {D_SINCE}")
 print(f"  batch_id  : {D_BATCH_ID}  (same for both runs)")
 
 # COMMAND ----------
+
 # ── D-2 : FIRST pass ─────────────────────────────────────────────────────────
 print("\n[D-2] First pass — Bronze")
 for entity in ALL_ENTITIES:
@@ -504,6 +536,7 @@ for k, v in counts_after_first.items():
     print(f"  {k:<50} {v}")
 
 # COMMAND ----------
+
 # ── D-3 : SECOND pass (identical params) ────────────────────────────────────
 print("\n[D-3] Second pass — Bronze  (same batch_id, same data)")
 for entity in ALL_ENTITIES:
@@ -534,6 +567,7 @@ for k, v in counts_after_second.items():
     print(f"  {k:<50} {v}")
 
 # COMMAND ----------
+
 # ── D-4 : Assert idempotency ─────────────────────────────────────────────────
 print("\n[D-4] Idempotency assertion")
 all_pass = True

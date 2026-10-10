@@ -1,5 +1,8 @@
 # Databricks notebook source
-# COMMAND ----------
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 03 - Bronze to Silver Transformation & Quality Cleansing
 # MAGIC
@@ -15,6 +18,7 @@
 # MAGIC 8. **Auditing & Reconciliation:** Every table run is logged via `log_run` to `ops.pipeline_execution_logs`. At the end, a reconciliation report (Bronze vs. Silver + Quarantined + Excluded) is printed.
 
 # COMMAND ----------
+
 dbutils.widgets.text("catalog", "workspace", "Unity Catalog Name")
 dbutils.widgets.text("repo", "surrealdb/surrealdb", "Repository Name ('owner/repo' or 'ALL')")
 dbutils.widgets.text("since", "", "Since Filter Timestamp (empty = no lower bound)")
@@ -24,6 +28,7 @@ dbutils.widgets.dropdown("run_mode", "full", ["full", "incremental", "backfill"]
 dbutils.widgets.text("salt", "", "PII Salt (Optional fallback)")
 
 # COMMAND ----------
+
 import sys
 import os
 import json
@@ -79,6 +84,7 @@ print(f"Run Mode:        {run_mode}")
 print(f"Salt Configured: {'Yes (Length: ' + str(len(salt)) + ')' if salt else 'No'}")
 
 # COMMAND ----------
+
 # 10 Tracked Database Repositories
 ALL_REPOS = [
     ("postgres", "postgres"),
@@ -94,6 +100,7 @@ ALL_REPOS = [
 ]
 
 # COMMAND ----------
+
 def transform_commits(bronze_df, repo_full_name, salt):
     """Transforms raw bronze commits to typed, PII-masked silver commits."""
     # Compute dates and hashes
@@ -294,10 +301,12 @@ def transform_metadata(bronze_df, repo_full_name):
     return valid_df, rejected_df, ["repo_id", "repo_full_name"]
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### Silver Transformation Runner Function
 
 # COMMAND ----------
+
 def run_silver_entity(
     spark,
     catalog: str,
@@ -432,10 +441,12 @@ def run_silver_entity(
         }
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### Execution & Reconciliation Loop
 
 # COMMAND ----------
+
 # Determine repositories to process
 if target_repo.upper() == "ALL":
     repos_to_process = [f"{owner}/{repo}" for owner, repo in ALL_REPOS]
@@ -492,11 +503,13 @@ for r_name in repos_to_process:
             })
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### Reconciliation Audit Report
 # MAGIC Verifies that: `Bronze Rows == (Silver Rows + Quarantined Rows + Excluded PRs)`
 
 # COMMAND ----------
+
 print("\n" + "=" * 105)
 print(f"{'REPOSITORY':<25} {'ENTITY':<15} {'BRONZE':<8} {'INSERTED':<10} {'UPDATED':<9} {'QUARANTINED':<13} {'EXCL_PRS':<10} {'STATUS'}")
 print("=" * 105)

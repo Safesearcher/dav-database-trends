@@ -1,5 +1,8 @@
 # Databricks notebook source
-# COMMAND ----------
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 01 - Pipeline Environment & Catalog Setup
 # MAGIC Initializes Unity Catalog schemas (`ops`, `bronze`, `silver`), Unity Catalog Volume for raw JSON storage,
@@ -12,6 +15,7 @@
 # MAGIC **Constraints:** Serverless-compatible, explicit DDL, parameterized catalog/schema widgets, Delta format.
 
 # COMMAND ----------
+
 dbutils.widgets.text("catalog", "workspace", "Unity Catalog Name")
 dbutils.widgets.text("bronze_schema", "bronze", "Bronze Schema Name")
 dbutils.widgets.text("volume_schema", "bronze_data", "Volume Schema Name")
@@ -37,6 +41,7 @@ print(f"Bronze Volume: {bronze_volume}")
 print(f"Reset Tables:  {reset_tables}")
 
 # COMMAND ----------
+
 import sys
 import os
 from datetime import datetime, timezone
@@ -53,10 +58,12 @@ from src.common import log_run, start_run, end_run
 batch_id = datetime.now(timezone.utc).strftime("setup_%Y%m%d_%H%M%S")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### 1. Create Unity Catalog Schemas & Volumes
 
 # COMMAND ----------
+
 with log_run(spark, layer="SETUP", parameter=f"catalog={catalog}", batch_id=batch_id, catalog=catalog) as run_ctx:
     # 1. Schemas DDL
     for s in [bronze_schema, volume_schema, silver_schema, ops_schema]:

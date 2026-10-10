@@ -518,14 +518,21 @@ def fetch_entity(
     elif entity == "pulls":
         cutoff_field = "created_at" if run_mode == "full" else "updated_at"
         url = build_url(owner, repo, entity, since_iso, until_iso, run_mode=run_mode)
-        return paginate_pulls(
-            url=url,
-            token=token,
-            since_iso=since_iso,
-            cutoff_field=cutoff_field,
-            until_iso=until_iso,
-            opener=opener,
-        )
+        try:
+            return paginate_pulls(
+                url=url,
+                token=token,
+                since_iso=since_iso,
+                cutoff_field=cutoff_field,
+                until_iso=until_iso,
+                opener=opener,
+            )
+        except GitHubFetchError as exc:
+            # Mirror repos (e.g. postgres/postgres) have PRs disabled -> 404
+            if "HTTP 404" in str(exc):
+                print(f"    [pulls] 404 for {owner}/{repo}: PRs disabled, treating as empty")
+                return [], {"pages": 1, "api_calls": 1}
+            raise
 
     elif entity == "issues":
         url = build_url(owner, repo, entity, since_iso, until_iso, run_mode=run_mode)

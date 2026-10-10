@@ -1,5 +1,8 @@
 # Databricks notebook source
-# COMMAND ----------
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 02 - Ingest Raw JSON into Bronze Delta Tables
 # MAGIC
@@ -14,6 +17,7 @@
 # MAGIC 8. **Multi-Repo Batch:** Supports `repo='ALL'` to process all 10 repos x 5 entities sequentially.
 
 # COMMAND ----------
+
 dbutils.widgets.text("catalog",   "workspace",                         "Unity Catalog Name")
 dbutils.widgets.text("repo",      "surrealdb/surrealdb",               "Repository (owner/repo) or 'ALL'")
 dbutils.widgets.dropdown("entity", "commits", ["commits", "issues", "pulls", "releases", "repo_metadata", "ALL"], "Entity Name")
@@ -24,6 +28,7 @@ dbutils.widgets.text("batch_id",  "",                                   "Batch R
 dbutils.widgets.dropdown("run_mode", "full", ["full", "incremental", "backfill"], "Execution Run Mode")
 
 # COMMAND ----------
+
 import sys
 import os
 import json
@@ -72,6 +77,7 @@ print(f"Batch ID:        {batch_id}")
 print(f"Window:          {since_str} -> {until_str}")
 
 # COMMAND ----------
+
 # 10 Tracked Database Repositories
 ALL_REPOS = [
     ("postgres", "postgres"),
@@ -97,6 +103,7 @@ TABLE_NAME_MAP = {
 }
 
 # COMMAND ----------
+
 def process_entity(
     repo_slug: str,
     entity_name: str,
@@ -264,10 +271,12 @@ def process_entity(
         return {"status": "SUCCESS", "inserted": inserted, "updated": updated, "drift": drifted_keys}
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### Execution Loop (Single Entity or ALL Repositories)
 
 # COMMAND ----------
+
 # Determine execution plan
 plan = []
 
@@ -331,10 +340,12 @@ print(f"Total Rows Updated:  {total_updated}")
 print(f"==================================================")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### Operational Audit Log Summary for this Batch
 
 # COMMAND ----------
+
 try:
     log_tbl = f"{catalog}.ops.pipeline_execution_logs"
     display(
@@ -371,4 +382,3 @@ try:
     dbutils.notebook.exit(json.dumps(summary))
 except Exception:
     pass
-
