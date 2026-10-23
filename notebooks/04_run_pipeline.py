@@ -6,20 +6,18 @@
 # MAGIC %md
 # MAGIC # 04 — Pipeline Orchestrator
 # MAGIC
-# MAGIC Drives the full **Bronze → Silver** pipeline by calling notebooks 02 and 03
-# MAGIC via `dbutils.notebook.run`.  Three clearly-labelled sections:
+# MAGIC Drives the full **Bronze → Silver → Gold** medallion pipeline by calling notebooks 02, 03, and 05
+# MAGIC via `dbutils.notebook.run`.  Four clearly-labelled sections:
 # MAGIC
 # MAGIC | Section | Purpose |
 # MAGIC |---------|---------|
-# MAGIC | **A — STANDARD INCREMENTAL RUN** | Normal nightly cadence for all repos / all entities |
-# MAGIC | **B — BACKFILL RUN** | Re-process an explicit time window for one repo |
-# MAGIC | **C — DRIFT TEST** | Exercises schema-drift detection and Silver quarantine |
+# MAGIC | **A — STANDARD INCREMENTAL RUN** | Normal nightly cadence for all repos / all entities / Gold star schema |
+# MAGIC | **B — BACKFILL RUN** | Re-process an explicit time window for one repo and refresh Gold |
+# MAGIC | **C — DRIFT TEST** | Exercises schema-drift detection, Silver quarantine, and Gold resilience |
+# MAGIC | **D — IDEMPOTENCY PROOF** | Runs the same batch twice; asserts Bronze, Silver, and Gold counts & measures are identical |
 # MAGIC
-# MAGIC Each section ends with a **verification cell** that prints row counts and the
-# MAGIC last 10 rows of `ops.pipeline_execution_logs`.
-# MAGIC
-# MAGIC A dedicated **idempotency proof** cell (Section D) runs the *same* batch twice
-# MAGIC and asserts that Silver and Bronze counts are unchanged after the second pass.
+# MAGIC Each section ends with a **verification cell** that prints row counts across all layers and the
+# MAGIC last 15 rows of `ops.pipeline_execution_logs`.
 
 # COMMAND ----------
 
@@ -32,6 +30,8 @@ dbutils.widgets.text("base_path",      "/Volumes/workspace/bronze_data/raw", "Vo
 dbutils.widgets.text("batch_id",       "",                                   "Batch ID (empty = auto)")
 dbutils.widgets.text("nb_02_path",     "./02_raw_to_bronze",                 "Path to notebook 02")
 dbutils.widgets.text("nb_03_path",     "./03_bronze_to_silver",              "Path to notebook 03")
+dbutils.widgets.text("nb_05_path",     "./05_silver_to_gold",                "Path to notebook 05")
+dbutils.widgets.dropdown("gold_mode",  "incremental", ["incremental", "full"], "Gold Processing Mode")
 dbutils.widgets.text("timeout_s",      "3600",                               "Notebook timeout (seconds)")
 # Section A/D date window — override these to change which window is fetched
 dbutils.widgets.text("incr_since",     "2026-09-25T00:00:00Z",               "Section A+D: incremental since")
@@ -52,6 +52,8 @@ CATALOG        = dbutils.widgets.get("catalog")
 BASE_PATH      = dbutils.widgets.get("base_path")
 NB_02          = dbutils.widgets.get("nb_02_path")
 NB_03          = dbutils.widgets.get("nb_03_path")
+NB_05          = dbutils.widgets.get("nb_05_path")
+GOLD_MODE      = dbutils.widgets.get("gold_mode")
 TIMEOUT        = int(dbutils.widgets.get("timeout_s"))
 BATCH_ID       = dbutils.widgets.get("batch_id") or f"run_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:6]}"
 # Section-scoped date params (read from widgets — override in the widget bar)
@@ -81,6 +83,8 @@ print(f"  base_path : {BASE_PATH}")
 print(f"  batch_id  : {BATCH_ID}")
 print(f"  NB_02     : {NB_02}")
 print(f"  NB_03     : {NB_03}")
+print(f"  NB_05     : {NB_05}")
+print(f"  gold_mode : {GOLD_MODE}")
 print(f"  timeout   : {TIMEOUT}s")
 
 # COMMAND ----------
@@ -98,15 +102,21 @@ def run_nb(path, params, timeout=TIMEOUT):
 
 # COMMAND ----------
 
-# Helper: show row counts for all Silver tables + Bronze tables
+# Helper: show row counts for all Gold + Silver + Bronze tables
 def show_counts(label=""):
-    print(f"\n{'='*70}")
+    print(f"\n{'='*75}")
     print(f"ROW COUNTS  {label}")
-    print(f"{'='*70}")
+    print(f"{'='*75}")
     layers = [
-        (f"{CATALOG}.bronze",  ["commits","issues","pull_requests","releases","repo_metadata"]),
-        (f"{CATALOG}.silver",  ["commits","issues","pull_requests","releases","repo_metadata"]),
-        (f"{CATALOG}.ops",     ["silver_quarantine"]),
+        (f"{CATALOG}.bronze", ["commits", "issues", "pull_requests", "releases", "repo_metadata"]),
+        (f"{CATALOG}.silver", ["commits", "issues", "pull_requests", "releases", "repo_metadata"]),
+        (f"{CATALOG}.gold",   [
+            "dim_repo", "dim_date", "dim_actor",
+            "fact_commits", "fact_issues", "fact_pull_requests",
+            "fact_releases", "fact_repo_snapshot", "fact_repo_daily_activity",
+            "audit_gold_reconciliation"
+        ]),
+        (f"{CATALOG}.ops",    ["silver_quarantine", "pipeline_execution_logs"]),
     ]
     for schema, tables in layers:
         for tbl in tables:
@@ -118,13 +128,19 @@ def show_counts(label=""):
 
 # COMMAND ----------
 
-# Helper: print last 10 rows of ops.pipeline_execution_logs
-def show_logs(label="", n=10):
-    print(f"\n{'─'*70}")
+# Helper: print last 15 rows of ops.pipeline_execution_logs
+def show_logs(label="", n=15):
+    print(f"\n{'─'*75}")
     print(f"Last {n} rows of ops.pipeline_execution_logs  {label}")
-    print(f"{'─'*70}")
+    print(f"{'─'*75}")
     try:
+        cols = [
+            "log_id", "layer", "status", "start_time",
+            "rows_inserted", "rows_updated", "rows_aggregated", "parameter"
+        ]
+        available = [c for c in cols if c in spark.table(f"{CATALOG}.ops.pipeline_execution_logs").columns]
         (spark.table(f"{CATALOG}.ops.pipeline_execution_logs")
+              .select(*available)
               .orderBy("start_time", ascending=False)
               .limit(n)
               .show(truncate=80))
@@ -234,9 +250,22 @@ for repo in ALL_REPOS:
 
 # COMMAND ----------
 
-# ── A-4 : Verification ───────────────────────────────────────────────────────
+# ── A-4 : Gold pass — star schema & aggregates ──────────────────────────────
+print(f"\n[A-4] Gold — star schema & aggregates")
+run_nb(NB_05, {
+    "catalog":        CATALOG,
+    "batch_id":       A_BATCH_ID,
+    "gold_mode":      "incremental",
+    "analysis_since": "2026-04-01",
+    "analysis_until": "2026-09-30",
+    "run_optimize":   "true",
+})
+
+# COMMAND ----------
+
+# ── A-5 : Verification ───────────────────────────────────────────────────────
 show_counts("after SECTION A — STANDARD INCREMENTAL RUN")
-show_logs("after SECTION A", n=10)
+show_logs("after SECTION A", n=15)
 
 # COMMAND ----------
 
@@ -297,9 +326,22 @@ run_nb(NB_03, {
 
 # COMMAND ----------
 
-# ── B-4 : Verification ───────────────────────────────────────────────────────
+# ── B-4 : Gold pass — refresh star schema after backfill ────────────────────
+print(f"\n[B-4] Gold — refresh star schema")
+run_nb(NB_05, {
+    "catalog":        CATALOG,
+    "batch_id":       B_BATCH_ID,
+    "gold_mode":      "full",
+    "analysis_since": "2026-04-01",
+    "analysis_until": "2026-09-30",
+    "run_optimize":   "true",
+})
+
+# COMMAND ----------
+
+# ── B-5 : Verification ───────────────────────────────────────────────────────
 show_counts(f"after SECTION B — BACKFILL {B_REPO} [{B_SINCE} → {B_UNTIL}]")
-show_logs("after SECTION B", n=10)
+show_logs("after SECTION B", n=15)
 
 # COMMAND ----------
 
@@ -483,21 +525,46 @@ D_UNTIL     = INCR_UNTIL           # widget: incr_until
 D_RUN_MODE  = "incremental"
 D_BATCH_ID  = f"{BATCH_ID}_idempotency_proof"   # fixed ID — MUST be the same on both runs
 
-def _bronze_silver_counts():
-    """Collect current row counts from all Bronze + Silver tables and quarantine."""
-    counts = {}
-    for schema, tables in [
-        (f"{CATALOG}.bronze", ["commits","issues","pull_requests","releases","repo_metadata"]),
-        (f"{CATALOG}.silver", ["commits","issues","pull_requests","releases","repo_metadata"]),
+def _pipeline_state():
+    """Collect current row counts and metric sums from Bronze, Silver, Ops, and Gold."""
+    state = {}
+    layers = [
+        (f"{CATALOG}.bronze", ["commits", "issues", "pull_requests", "releases", "repo_metadata"]),
+        (f"{CATALOG}.silver", ["commits", "issues", "pull_requests", "releases", "repo_metadata"]),
+        (f"{CATALOG}.gold",   [
+            "dim_repo", "dim_date", "dim_actor",
+            "fact_commits", "fact_issues", "fact_pull_requests",
+            "fact_releases", "fact_repo_snapshot", "fact_repo_daily_activity"
+        ]),
         (f"{CATALOG}.ops",    ["silver_quarantine"]),
-    ]:
+    ]
+    for schema, tables in layers:
         for tbl in tables:
             key = f"{schema}.{tbl}"
             try:
-                counts[key] = spark.table(key).count()
+                state[key] = spark.table(key).count()
             except Exception:
-                counts[key] = None   # table doesn't exist yet
-    return counts
+                state[key] = None
+
+    # Collect analytical measure sums to prove aggregate stability
+    try:
+        agg_sums = (
+            spark.table(f"{CATALOG}.gold.fact_repo_daily_activity")
+            .select(
+                F.sum("commits_total").alias("sum_commits_total"),
+                F.sum("commits_human").alias("sum_commits_human"),
+                F.sum("commits_bot").alias("sum_commits_bot"),
+            )
+            .first()
+        )
+        if agg_sums:
+            state["gold.fact_repo_daily_activity[sum_commits_total]"] = agg_sums["sum_commits_total"]
+            state["gold.fact_repo_daily_activity[sum_commits_human]"] = agg_sums["sum_commits_human"]
+            state["gold.fact_repo_daily_activity[sum_commits_bot]"] = agg_sums["sum_commits_bot"]
+    except Exception:
+        pass
+
+    return state
 
 print(f"[Section D] IDEMPOTENCY PROOF")
 print(f"  repo      : {D_REPO}")
@@ -530,10 +597,20 @@ run_nb(NB_03, {
     "run_mode": D_RUN_MODE,
 })
 
-counts_after_first = _bronze_silver_counts()
-print("\nCounts after first pass:")
-for k, v in counts_after_first.items():
-    print(f"  {k:<50} {v}")
+print("\n[D-2] First pass — Gold")
+run_nb(NB_05, {
+    "catalog":        CATALOG,
+    "batch_id":       D_BATCH_ID,
+    "gold_mode":      "incremental",
+    "analysis_since": "2026-04-01",
+    "analysis_until": "2026-09-30",
+    "run_optimize":   "false",
+})
+
+state_after_first = _pipeline_state()
+print("\nPipeline state after first pass:")
+for k, v in state_after_first.items():
+    print(f"  {k:<55} {v}")
 
 # COMMAND ----------
 
@@ -561,35 +638,46 @@ run_nb(NB_03, {
     "run_mode": D_RUN_MODE,
 })
 
-counts_after_second = _bronze_silver_counts()
-print("\nCounts after second pass:")
-for k, v in counts_after_second.items():
-    print(f"  {k:<50} {v}")
+print("\n[D-3] Second pass — Gold  (same batch_id, same data)")
+run_nb(NB_05, {
+    "catalog":        CATALOG,
+    "batch_id":       D_BATCH_ID,
+    "gold_mode":      "incremental",
+    "analysis_since": "2026-04-01",
+    "analysis_until": "2026-09-30",
+    "run_optimize":   "false",
+})
+
+state_after_second = _pipeline_state()
+print("\nPipeline state after second pass:")
+for k, v in state_after_second.items():
+    print(f"  {k:<55} {v}")
 
 # COMMAND ----------
 
 # ── D-4 : Assert idempotency ─────────────────────────────────────────────────
 print("\n[D-4] Idempotency assertion")
 all_pass = True
-for key in counts_after_first:
-    v1 = counts_after_first[key]
-    v2 = counts_after_second[key]
+for key in state_after_first:
+    v1 = state_after_first[key]
+    v2 = state_after_second[key]
     if v1 is None and v2 is None:
         continue
     if v1 != v2:
-        print(f"  ✗ FAIL: {key}  first={v1}  second={v2}  DELTA={v2 - (v1 or 0)}")
+        print(f"  ✗ FAIL: {key}  first={v1}  second={v2}  DELTA={(v2 or 0) - (v1 or 0)}")
         all_pass = False
     else:
-        print(f"  ✓ PASS: {key}  count={v2} (unchanged)")
+        print(f"  ✓ PASS: {key}  value={v2} (unchanged)")
 
 if all_pass:
-    print("\n  ✓ IDEMPOTENCY CONFIRMED — all row counts are identical after second pass.")
-    print("    The MERGE INTO strategy correctly upserts without duplicates.\n")
+    print("\n  ✓ FULL MEDALLION IDEMPOTENCY CONFIRMED:")
+    print("    All table row counts and measure sums in Bronze, Silver, and Gold are identical after the second pass.")
+    print("    Delta MERGE INTO logic correctly deduplicates and upserts across the entire pipeline.\n")
 else:
     raise AssertionError(
-        "Idempotency check FAILED. One or more table row counts changed on the second pass. "
-        "Review the MERGE keys in notebooks/02_raw_to_bronze.py and 03_bronze_to_silver.py."
+        "Idempotency check FAILED. One or more table row counts or measure sums changed on the second pass. "
+        "Review the MERGE keys in notebooks 02, 03, and 05."
     )
 
 show_counts("after SECTION D — IDEMPOTENCY PROOF")
-show_logs("after SECTION D", n=10)
+show_logs("after SECTION D", n=15)
