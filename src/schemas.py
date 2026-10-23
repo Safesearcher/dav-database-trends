@@ -21,6 +21,7 @@ try:
         DoubleType,
         BooleanType,
         TimestampType,
+        DateType,
         ArrayType,
     )
 except ImportError:
@@ -32,6 +33,9 @@ except ImportError:
             return self.__class__.__name__
 
     class StringType(DataType):
+        pass
+
+    class DateType(DataType):
         pass
 
     class IntegerType(DataType):
@@ -486,7 +490,188 @@ PIPELINE_EXECUTION_LOGS_SCHEMA = StructType([
     StructField("status", StringType(), False),
     StructField("rows_inserted", LongType(), True),
     StructField("rows_updated", LongType(), True),
+    StructField("rows_aggregated", LongType(), True),
     StructField("error_message", StringType(), True),
     StructField("load_timestamp", TimestampType(), False),
 ])
 """Operational audit log schema: tracks batch runs, execution durations, row metrics, and error traces in ops table."""
+
+
+# =============================================================================
+# Gold Star Schema & Dimensional Model Definitions
+# =============================================================================
+
+GOLD_DIM_REPO_SCHEMA = StructType([
+    StructField("repo_key", LongType(), False),
+    StructField("repo_id", LongType(), False),
+    StructField("repo_full_name", StringType(), False),
+    StructField("repo_name", StringType(), True),
+    StructField("owner_login", StringType(), True),
+    StructField("description", StringType(), True),
+    StructField("default_branch", StringType(), True),
+    StructField("license_spdx_id", StringType(), True),
+    StructField("created_at_utc", TimestampType(), True),
+    StructField("db_type", StringType(), False),
+    StructField("db_category", StringType(), False),
+    StructField("load_timestamp", TimestampType(), False),
+])
+"""Gold dim_repo schema: SCD Type 1 repository dimension with classified db_type and db_category."""
+
+GOLD_DIM_DATE_SCHEMA = StructType([
+    StructField("date_key", IntegerType(), False),
+    StructField("full_date", DateType(), False),
+    StructField("year", IntegerType(), False),
+    StructField("quarter", IntegerType(), False),
+    StructField("month", IntegerType(), False),
+    StructField("month_name", StringType(), False),
+    StructField("week_of_year", IntegerType(), False),
+    StructField("day_of_month", IntegerType(), False),
+    StructField("day_of_week", IntegerType(), False),
+    StructField("is_weekend", BooleanType(), False),
+    StructField("in_analysis_window", BooleanType(), False),
+    StructField("load_timestamp", TimestampType(), False),
+])
+"""Gold dim_date schema: Calendar dimension spine with temporal grains and analysis window tagging."""
+
+GOLD_DIM_ACTOR_SCHEMA = StructType([
+    StructField("actor_key", LongType(), False),
+    StructField("actor_identity", StringType(), False),
+    StructField("author_login", StringType(), True),
+    StructField("author_id", LongType(), True),
+    StructField("author_email_hash", StringType(), True),
+    StructField("identity_source", StringType(), False),
+    StructField("is_bot", BooleanType(), False),
+    StructField("load_timestamp", TimestampType(), False),
+])
+"""Gold dim_actor schema: Contributor dimension resolving logins, hashes, bots, and explicit Unknown fallback."""
+
+GOLD_FACT_COMMITS_SCHEMA = StructType([
+    StructField("repo_key", LongType(), False),
+    StructField("date_key", IntegerType(), False),
+    StructField("actor_key", LongType(), False),
+    StructField("commit_sha", StringType(), False),
+    StructField("comment_count", IntegerType(), True),
+    StructField("is_bot", BooleanType(), False),
+    StructField("in_analysis_window", BooleanType(), False),
+    StructField("load_timestamp", TimestampType(), False),
+])
+"""Gold fact_commits schema: Commit grain fact linking repo, date, and actor dimensions."""
+
+GOLD_FACT_ISSUES_SCHEMA = StructType([
+    StructField("repo_key", LongType(), False),
+    StructField("created_date_key", IntegerType(), False),
+    StructField("closed_date_key", IntegerType(), True),
+    StructField("actor_key", LongType(), False),
+    StructField("issue_number", IntegerType(), False),
+    StructField("state", StringType(), False),
+    StructField("is_open", BooleanType(), False),
+    StructField("comments_count", IntegerType(), True),
+    StructField("label_count", IntegerType(), True),
+    StructField("time_to_close_hours", DoubleType(), True),
+    StructField("in_analysis_window", BooleanType(), False),
+    StructField("load_timestamp", TimestampType(), False),
+])
+"""Gold fact_issues schema: True issues grain fact capturing lifecycle cycle times."""
+
+GOLD_FACT_PULL_REQUESTS_SCHEMA = StructType([
+    StructField("repo_key", LongType(), False),
+    StructField("created_date_key", IntegerType(), False),
+    StructField("closed_date_key", IntegerType(), True),
+    StructField("merged_date_key", IntegerType(), True),
+    StructField("actor_key", LongType(), False),
+    StructField("pr_number", IntegerType(), False),
+    StructField("is_merged", BooleanType(), False),
+    StructField("is_bot", BooleanType(), False),
+    StructField("hours_to_merge", DoubleType(), True),
+    StructField("in_analysis_window", BooleanType(), False),
+    StructField("load_timestamp", TimestampType(), False),
+])
+"""Gold fact_pull_requests schema: Pull request lifecycle fact tracking velocity and merge duration."""
+
+GOLD_FACT_RELEASES_SCHEMA = StructType([
+    StructField("repo_key", LongType(), False),
+    StructField("published_date_key", IntegerType(), False),
+    StructField("release_id", LongType(), False),
+    StructField("tag_name", StringType(), True),
+    StructField("is_prerelease", BooleanType(), False),
+    StructField("is_draft", BooleanType(), False),
+    StructField("assets_count", IntegerType(), True),
+    StructField("days_since_previous_release", DoubleType(), True),
+    StructField("in_analysis_window", BooleanType(), False),
+    StructField("load_timestamp", TimestampType(), False),
+])
+"""Gold fact_releases schema: Release cadence fact measuring intervals between consecutive versions."""
+
+GOLD_FACT_REPO_SNAPSHOT_SCHEMA = StructType([
+    StructField("repo_key", LongType(), False),
+    StructField("snapshot_date_key", IntegerType(), False),
+    StructField("stargazers_count", IntegerType(), True),
+    StructField("forks_count", IntegerType(), True),
+    StructField("open_issues_count", IntegerType(), True),
+    StructField("in_analysis_window", BooleanType(), False),
+    StructField("load_timestamp", TimestampType(), False),
+])
+"""Gold fact_repo_snapshot schema: Periodic repository metric snapshot tracking popularity metrics."""
+
+GOLD_FACT_REPO_DAILY_ACTIVITY_SCHEMA = StructType([
+    StructField("repo_key", LongType(), False),
+    StructField("date_key", IntegerType(), False),
+    StructField("commits_total", LongType(), False),
+    StructField("commits_human", LongType(), False),
+    StructField("commits_bot", LongType(), False),
+    StructField("distinct_human_authors", LongType(), False),
+    StructField("issues_opened", LongType(), False),
+    StructField("issues_closed", LongType(), False),
+    StructField("prs_opened", LongType(), False),
+    StructField("prs_merged", LongType(), False),
+    StructField("releases_published", LongType(), False),
+    StructField("commits_human_4wk", LongType(), False),
+    StructField("commits_human_12wk", LongType(), False),
+    StructField("in_analysis_window", BooleanType(), False),
+    StructField("load_timestamp", TimestampType(), False),
+])
+"""Gold fact_repo_daily_activity schema: Dense daily aggregate fact with rolling 4-week and 12-week velocity metrics."""
+
+GOLD_AUDIT_PIPELINE_RUNS_SCHEMA = StructType([
+    StructField("log_id", StringType(), False),
+    StructField("run_date", DateType(), True),
+    StructField("layer", StringType(), False),
+    StructField("parameter", StringType(), True),
+    StructField("status", StringType(), False),
+    StructField("duration_seconds", DoubleType(), True),
+    StructField("rows_inserted", LongType(), True),
+    StructField("rows_updated", LongType(), True),
+    StructField("rows_aggregated", LongType(), True),
+    StructField("error_message", StringType(), True),
+])
+
+GOLD_AUDIT_QUARANTINE_SUMMARY_SCHEMA = StructType([
+    StructField("quarantine_date", DateType(), True),
+    StructField("layer", StringType(), False),
+    StructField("entity", StringType(), False),
+    StructField("repo_full_name", StringType(), True),
+    StructField("rejection_reason", StringType(), False),
+    StructField("quarantine_count", LongType(), False),
+])
+
+GOLD_AUDIT_GOLD_RECONCILIATION_SCHEMA = StructType([
+    StructField("table_name", StringType(), False),
+    StructField("silver_source_rows", LongType(), True),
+    StructField("gold_target_rows", LongType(), True),
+    StructField("delta_rows", LongType(), True),
+    StructField("status", StringType(), False),
+    StructField("check_timestamp", TimestampType(), False),
+])
+
+GOLD_SCHEMAS = {
+    "dim_repo": GOLD_DIM_REPO_SCHEMA,
+    "dim_date": GOLD_DIM_DATE_SCHEMA,
+    "dim_actor": GOLD_DIM_ACTOR_SCHEMA,
+    "fact_commits": GOLD_FACT_COMMITS_SCHEMA,
+    "fact_issues": GOLD_FACT_ISSUES_SCHEMA,
+    "fact_pull_requests": GOLD_FACT_PULL_REQUESTS_SCHEMA,
+    "fact_releases": GOLD_FACT_RELEASES_SCHEMA,
+    "fact_repo_snapshot": GOLD_FACT_REPO_SNAPSHOT_SCHEMA,
+    "fact_repo_daily_activity": GOLD_FACT_REPO_DAILY_ACTIVITY_SCHEMA,
+}
+

@@ -145,28 +145,37 @@ def get_params(dbutils=None) -> dict:
 
 def get_salt(dbutils=None, scope: str = "dbtrends", key: str = "salt", widget_name: str = "salt") -> str:
     """Resolve salt from dbutils secrets, widget fallback, then environment variable."""
+    resolved_salt = None
     if dbutils is not None:
         try:
             val = dbutils.secrets.get(scope=scope, key=key)
             if val and str(val).strip():
-                return str(val).strip()
+                resolved_salt = str(val).strip()
         except Exception:
             pass
 
-        try:
-            val = dbutils.widgets.get(widget_name)
-            if val and str(val).strip():
-                return str(val).strip()
-        except Exception:
-            pass
+        if not resolved_salt:
+            try:
+                val = dbutils.widgets.get(widget_name)
+                if val and str(val).strip():
+                    resolved_salt = str(val).strip()
+            except Exception:
+                pass
 
-    env_val = os.environ.get("SALT")
-    if env_val and str(env_val).strip():
-        return str(env_val).strip()
+    if not resolved_salt:
+        env_val = os.environ.get("SALT")
+        if env_val and str(env_val).strip():
+            resolved_salt = str(env_val).strip()
 
-    raise ValueError(
-        "No salt configured. Set dbutils.secrets.get('dbtrends', 'salt'), add widget 'salt', or export SALT."
-    )
+    if not resolved_salt:
+        raise ValueError(
+            "No salt configured. Set dbutils.secrets.get('dbtrends', 'salt'), add widget 'salt', or export SALT."
+        )
+
+    if len(resolved_salt) < 16:
+        print("  [Warning] PII salt is shorter than 16 characters; consider using a longer salt for production security.")
+
+    return resolved_salt
 
 
 def hash_email(col, salt: str):
@@ -404,6 +413,7 @@ def evolve_table_schema(spark, target_table: str, new_cols) -> list:
 # -----------------------------------------------------------------------------
 
 VALID_LOG_STATUSES = {"SUCCESS", "FAILURE"}
+VALID_LAYERS = {"BRONZE", "SILVER", "GOLD", "INGEST", "OPS"}
 
 
 def build_log_row(
@@ -416,12 +426,14 @@ def build_log_row(
     status: str,
     rows_inserted: int = 0,
     rows_updated: int = 0,
+    rows_aggregated: int = None,
     error_message: str = None,
     load_timestamp: datetime = None,
 ) -> tuple:
     """Builds a validated log row tuple matching PIPELINE_EXECUTION_LOGS_SCHEMA.
 
     Status must strictly be 'SUCCESS' or 'FAILURE'.
+    Layer value GOLD must be accepted along with standard medallion layers.
     """
     if status not in VALID_LOG_STATUSES:
         raise ValueError(
@@ -439,6 +451,7 @@ def build_log_row(
         status,
         int(rows_inserted) if rows_inserted is not None else 0,
         int(rows_updated) if rows_updated is not None else 0,
+        int(rows_aggregated) if rows_aggregated is not None else None,
         str(error_message) if error_message is not None else None,
         load_timestamp,
     )
@@ -456,6 +469,7 @@ def start_run(spark: SparkSession, layer: str, parameter: str, batch_id: str, ca
         "status": "SUCCESS",
         "rows_inserted": 0,
         "rows_updated": 0,
+        "rows_aggregated": None,
         "message": None,
         "error_message": None,
     }
@@ -472,6 +486,7 @@ def end_run(
     status: str,
     rows_inserted: int = 0,
     rows_updated: int = 0,
+    rows_aggregated: int = None,
     error_message: str = None,
     catalog: str = "workspace",
 ):
@@ -489,6 +504,7 @@ def end_run(
         status=status,
         rows_inserted=rows_inserted,
         rows_updated=rows_updated,
+        rows_aggregated=rows_aggregated,
         error_message=error_message,
     )
 
@@ -523,6 +539,7 @@ def log_run(spark: SparkSession, layer: str, parameter: str, batch_id: str, cata
             status=status,
             rows_inserted=run_ctx.get("rows_inserted", 0),
             rows_updated=run_ctx.get("rows_updated", 0),
+            rows_aggregated=run_ctx.get("rows_aggregated"),
             error_message=msg,
             catalog=catalog,
         )
@@ -544,6 +561,7 @@ def log_run(spark: SparkSession, layer: str, parameter: str, batch_id: str, cata
                 status="FAILURE",
                 rows_inserted=run_ctx.get("rows_inserted", 0),
                 rows_updated=run_ctx.get("rows_updated", 0),
+                rows_aggregated=run_ctx.get("rows_aggregated"),
                 error_message=msg,
                 catalog=catalog,
             )

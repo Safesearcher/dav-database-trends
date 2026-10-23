@@ -76,12 +76,43 @@ class TestMedallionSchemas(unittest.TestCase):
         field_names = [f.name for f in PIPELINE_EXECUTION_LOGS_SCHEMA.fields]
         self.assertIn("parameter", field_names)
         self.assertIn("batch_id", field_names)
+        self.assertIn("rows_aggregated", field_names)
         self.assertNotIn("parameter_file", field_names)
 
     def test_silver_quarantine_columns(self):
         field_names = [f.name for f in SILVER_QUARANTINE_SCHEMA.fields]
         self.assertIn("batch_id", field_names)
         self.assertIn("quarantine_id", field_names)
+
+    def test_all_gold_schemas_contain_load_timestamp(self):
+        from src.schemas import (
+            GOLD_DIM_REPO_SCHEMA,
+            GOLD_DIM_DATE_SCHEMA,
+            GOLD_DIM_ACTOR_SCHEMA,
+            GOLD_FACT_COMMITS_SCHEMA,
+            GOLD_FACT_ISSUES_SCHEMA,
+            GOLD_FACT_PULL_REQUESTS_SCHEMA,
+            GOLD_FACT_RELEASES_SCHEMA,
+            GOLD_FACT_REPO_SNAPSHOT_SCHEMA,
+            GOLD_FACT_REPO_DAILY_ACTIVITY_SCHEMA,
+            GOLD_SCHEMAS,
+        )
+        gold_schemas = [
+            GOLD_DIM_REPO_SCHEMA,
+            GOLD_DIM_DATE_SCHEMA,
+            GOLD_DIM_ACTOR_SCHEMA,
+            GOLD_FACT_COMMITS_SCHEMA,
+            GOLD_FACT_ISSUES_SCHEMA,
+            GOLD_FACT_PULL_REQUESTS_SCHEMA,
+            GOLD_FACT_RELEASES_SCHEMA,
+            GOLD_FACT_REPO_SNAPSHOT_SCHEMA,
+            GOLD_FACT_REPO_DAILY_ACTIVITY_SCHEMA,
+        ]
+        self.assertEqual(len(GOLD_SCHEMAS), 9)
+        for s in gold_schemas:
+            field_names = [f.name for f in s.fields]
+            self.assertIn("load_timestamp", field_names, f"Missing load_timestamp in schema: {s}")
+            self.assertIsInstance(s["load_timestamp"].dataType, TimestampType)
 
 
 if __name__ == "__main__":

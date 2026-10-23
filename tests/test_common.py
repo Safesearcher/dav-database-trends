@@ -121,25 +121,27 @@ class TestCommonFunctions(unittest.TestCase):
         from src.common import build_log_row
         now = datetime.now(timezone.utc)
         
-        # Test SUCCESS with message
+        # Test SUCCESS with message and GOLD layer
         row_succ = build_log_row(
             log_id="log-1",
-            layer="BRONZE",
-            parameter="test_p",
+            layer="GOLD",
+            parameter="table=fact_commits;mode=incremental",
             batch_id="b-1",
             start_time=now,
             end_time=now,
             status="SUCCESS",
             rows_inserted=10,
             rows_updated=5,
+            rows_aggregated=100,
             error_message="PARTIAL_QUARANTINE: 2/12 records quarantined",
         )
         self.assertEqual(row_succ[0], "log-1")
-        self.assertEqual(row_succ[1], "BRONZE")
+        self.assertEqual(row_succ[1], "GOLD")
         self.assertEqual(row_succ[6], "SUCCESS")
         self.assertEqual(row_succ[7], 10)
         self.assertEqual(row_succ[8], 5)
-        self.assertEqual(row_succ[9], "PARTIAL_QUARANTINE: 2/12 records quarantined")
+        self.assertEqual(row_succ[9], 100)
+        self.assertEqual(row_succ[10], "PARTIAL_QUARANTINE: 2/12 records quarantined")
 
         # Test FAILURE with message
         row_fail = build_log_row(
@@ -155,7 +157,8 @@ class TestCommonFunctions(unittest.TestCase):
             error_message="ALL_RECORDS_QUARANTINED",
         )
         self.assertEqual(row_fail[6], "FAILURE")
-        self.assertEqual(row_fail[9], "ALL_RECORDS_QUARANTINED")
+        self.assertIsNone(row_fail[9])
+        self.assertEqual(row_fail[10], "ALL_RECORDS_QUARANTINED")
 
     def test_build_log_row_invalid_status_raises(self):
         from src.common import build_log_row
@@ -176,15 +179,18 @@ class TestCommonFunctions(unittest.TestCase):
     def test_log_run_preserves_message_on_success(self):
         from src.common import log_run
         mock_spark = mock.MagicMock()
-        with log_run(mock_spark, layer="BRONZE", parameter="p", batch_id="b") as ctx:
+        with log_run(mock_spark, layer="GOLD", parameter="p", batch_id="b") as ctx:
             ctx["message"] = "NO_DATA"
             ctx["rows_inserted"] = 0
             ctx["rows_updated"] = 0
+            ctx["rows_aggregated"] = 50
 
         self.assertTrue(mock_spark.createDataFrame.called)
         logged_row = mock_spark.createDataFrame.call_args[0][0][0]
+        self.assertEqual(logged_row[1], "GOLD")
         self.assertEqual(logged_row[6], "SUCCESS")
-        self.assertEqual(logged_row[9], "NO_DATA")
+        self.assertEqual(logged_row[9], 50)
+        self.assertEqual(logged_row[10], "NO_DATA")
 
 
 if __name__ == "__main__":
