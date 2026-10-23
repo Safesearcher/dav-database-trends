@@ -67,8 +67,6 @@ if workspace_root not in sys.path:
 from src.schemas import GOLD_SCHEMAS
 from src.common import (
     get_params,
-    start_run,
-    end_run,
     log_run,
     merge_delta,
 )
@@ -169,29 +167,21 @@ print("Silver source DataFrames prepared.")
 # COMMAND ----------
 
 # 2.1 dim_repo (SCD 1)
-run_ctx_repo = start_run(dbutils, batch_id)
-try:
+with log_run(spark, layer="GOLD", parameter="table=dim_repo,repo=ALL,entity=repo_metadata", batch_id=batch_id, catalog=catalog) as run_ctx_repo:
     df_dim_repo = build_dim_repo(df_silver_repo_meta)
     ins_repo, upd_repo = merge_delta(
         spark,
-        f"{catalog}.{gold_schema}.dim_repo",
         df_dim_repo,
+        f"{catalog}.{gold_schema}.dim_repo",
         ["repo_key"],
         update_all=True
     )
     run_ctx_repo["rows_inserted"] = ins_repo
     run_ctx_repo["rows_updated"] = upd_repo
-    end_run(run_ctx_repo, "SUCCESS")
     print(f"  ✓ dim_repo merged: {ins_repo} inserted, {upd_repo} updated")
-except Exception as e:
-    end_run(run_ctx_repo, "FAILED", str(e))
-    raise e
-finally:
-    log_run(spark, catalog, ops_schema, run_ctx_repo, layer="GOLD", table="dim_repo", repo="ALL", entity="repo_metadata")
 
 # 2.2 dim_date (Calendar Spine)
-run_ctx_date = start_run(dbutils, batch_id)
-try:
+with log_run(spark, layer="GOLD", parameter="table=dim_date,repo=ALL,entity=calendar", batch_id=batch_id, catalog=catalog) as run_ctx_date:
     df_dim_date = build_dim_date(
         spark,
         start_date_str="2020-01-01",
@@ -201,24 +191,17 @@ try:
     )
     ins_date, upd_date = merge_delta(
         spark,
-        f"{catalog}.{gold_schema}.dim_date",
         df_dim_date,
+        f"{catalog}.{gold_schema}.dim_date",
         ["date_key"],
         update_all=True
     )
     run_ctx_date["rows_inserted"] = ins_date
     run_ctx_date["rows_updated"] = upd_date
-    end_run(run_ctx_date, "SUCCESS")
     print(f"  ✓ dim_date merged: {ins_date} inserted, {upd_date} updated")
-except Exception as e:
-    end_run(run_ctx_date, "FAILED", str(e))
-    raise e
-finally:
-    log_run(spark, catalog, ops_schema, run_ctx_date, layer="GOLD", table="dim_date", repo="ALL", entity="calendar")
 
 # 2.3 dim_actor (SCD 1 with Unknown Member)
-run_ctx_actor = start_run(dbutils, batch_id)
-try:
+with log_run(spark, layer="GOLD", parameter="table=dim_actor,repo=ALL,entity=actors", batch_id=batch_id, catalog=catalog) as run_ctx_actor:
     # Build dim_actor from available actors in commits and pull requests
     df_dim_actor = build_dim_actor(
         df_commits=df_silver_commits,
@@ -228,20 +211,14 @@ try:
     )
     ins_actor, upd_actor = merge_delta(
         spark,
-        f"{catalog}.{gold_schema}.dim_actor",
         df_dim_actor,
+        f"{catalog}.{gold_schema}.dim_actor",
         ["actor_key"],
         update_all=True
     )
     run_ctx_actor["rows_inserted"] = ins_actor
     run_ctx_actor["rows_updated"] = upd_actor
-    end_run(run_ctx_actor, "SUCCESS")
     print(f"  ✓ dim_actor merged: {ins_actor} inserted, {upd_actor} updated")
-except Exception as e:
-    end_run(run_ctx_actor, "FAILED", str(e))
-    raise e
-finally:
-    log_run(spark, catalog, ops_schema, run_ctx_actor, layer="GOLD", table="dim_actor", repo="ALL", entity="actors")
 
 # COMMAND ----------
 
@@ -251,110 +228,75 @@ finally:
 # COMMAND ----------
 
 # 3.1 fact_commits
-run_ctx_fc = start_run(dbutils, batch_id)
-try:
+with log_run(spark, layer="GOLD", parameter="table=fact_commits,repo=ALL,entity=commits", batch_id=batch_id, catalog=catalog) as run_ctx_fc:
     df_fact_commits = build_fact_commits(df_src_commits, analysis_since, analysis_until)
     ins_fc, upd_fc = merge_delta(
         spark,
-        f"{catalog}.{gold_schema}.fact_commits",
         df_fact_commits,
+        f"{catalog}.{gold_schema}.fact_commits",
         ["repo_key", "commit_sha"],
         update_all=True
     )
     run_ctx_fc["rows_inserted"] = ins_fc
     run_ctx_fc["rows_updated"] = upd_fc
-    end_run(run_ctx_fc, "SUCCESS")
     print(f"  ✓ fact_commits merged: {ins_fc} inserted, {upd_fc} updated")
-except Exception as e:
-    end_run(run_ctx_fc, "FAILED", str(e))
-    raise e
-finally:
-    log_run(spark, catalog, ops_schema, run_ctx_fc, layer="GOLD", table="fact_commits", repo="ALL", entity="commits")
 
 # 3.2 fact_issues
-run_ctx_fi = start_run(dbutils, batch_id)
-try:
+with log_run(spark, layer="GOLD", parameter="table=fact_issues,repo=ALL,entity=issues", batch_id=batch_id, catalog=catalog) as run_ctx_fi:
     df_fact_issues = build_fact_issues(df_src_issues, analysis_since, analysis_until)
     ins_fi, upd_fi = merge_delta(
         spark,
-        f"{catalog}.{gold_schema}.fact_issues",
         df_fact_issues,
+        f"{catalog}.{gold_schema}.fact_issues",
         ["repo_key", "issue_number"],
         update_all=True
     )
     run_ctx_fi["rows_inserted"] = ins_fi
     run_ctx_fi["rows_updated"] = upd_fi
-    end_run(run_ctx_fi, "SUCCESS")
     print(f"  ✓ fact_issues merged: {ins_fi} inserted, {upd_fi} updated")
-except Exception as e:
-    end_run(run_ctx_fi, "FAILED", str(e))
-    raise e
-finally:
-    log_run(spark, catalog, ops_schema, run_ctx_fi, layer="GOLD", table="fact_issues", repo="ALL", entity="issues")
 
 # 3.3 fact_pull_requests
-run_ctx_fpr = start_run(dbutils, batch_id)
-try:
+with log_run(spark, layer="GOLD", parameter="table=fact_pull_requests,repo=ALL,entity=pull_requests", batch_id=batch_id, catalog=catalog) as run_ctx_fpr:
     df_fact_pull_requests = build_fact_pull_requests(df_src_pulls, analysis_since, analysis_until)
     ins_fpr, upd_fpr = merge_delta(
         spark,
-        f"{catalog}.{gold_schema}.fact_pull_requests",
         df_fact_pull_requests,
+        f"{catalog}.{gold_schema}.fact_pull_requests",
         ["repo_key", "pr_number"],
         update_all=True
     )
     run_ctx_fpr["rows_inserted"] = ins_fpr
     run_ctx_fpr["rows_updated"] = upd_fpr
-    end_run(run_ctx_fpr, "SUCCESS")
     print(f"  ✓ fact_pull_requests merged: {ins_fpr} inserted, {upd_fpr} updated")
-except Exception as e:
-    end_run(run_ctx_fpr, "FAILED", str(e))
-    raise e
-finally:
-    log_run(spark, catalog, ops_schema, run_ctx_fpr, layer="GOLD", table="fact_pull_requests", repo="ALL", entity="pull_requests")
 
 # 3.4 fact_releases
-run_ctx_fr = start_run(dbutils, batch_id)
-try:
+with log_run(spark, layer="GOLD", parameter="table=fact_releases,repo=ALL,entity=releases", batch_id=batch_id, catalog=catalog) as run_ctx_fr:
     # Full silver releases must be provided to accurately calculate lag over release sequence
     df_fact_releases = build_fact_releases(df_silver_releases, analysis_since, analysis_until)
     ins_fr, upd_fr = merge_delta(
         spark,
-        f"{catalog}.{gold_schema}.fact_releases",
         df_fact_releases,
+        f"{catalog}.{gold_schema}.fact_releases",
         ["repo_key", "release_id"],
         update_all=True
     )
     run_ctx_fr["rows_inserted"] = ins_fr
     run_ctx_fr["rows_updated"] = upd_fr
-    end_run(run_ctx_fr, "SUCCESS")
     print(f"  ✓ fact_releases merged: {ins_fr} inserted, {upd_fr} updated")
-except Exception as e:
-    end_run(run_ctx_fr, "FAILED", str(e))
-    raise e
-finally:
-    log_run(spark, catalog, ops_schema, run_ctx_fr, layer="GOLD", table="fact_releases", repo="ALL", entity="releases")
 
 # 3.5 fact_repo_snapshot
-run_ctx_fs = start_run(dbutils, batch_id)
-try:
+with log_run(spark, layer="GOLD", parameter="table=fact_repo_snapshot,repo=ALL,entity=repo_metadata", batch_id=batch_id, catalog=catalog) as run_ctx_fs:
     df_fact_repo_snapshot = build_fact_repo_snapshot(df_src_repo_meta, window_since=analysis_since, window_until=analysis_until)
     ins_fs, upd_fs = merge_delta(
         spark,
-        f"{catalog}.{gold_schema}.fact_repo_snapshot",
         df_fact_repo_snapshot,
+        f"{catalog}.{gold_schema}.fact_repo_snapshot",
         ["repo_key", "snapshot_date_key"],
         update_all=True
     )
     run_ctx_fs["rows_inserted"] = ins_fs
     run_ctx_fs["rows_updated"] = upd_fs
-    end_run(run_ctx_fs, "SUCCESS")
     print(f"  ✓ fact_repo_snapshot merged: {ins_fs} inserted, {upd_fs} updated")
-except Exception as e:
-    end_run(run_ctx_fs, "FAILED", str(e))
-    raise e
-finally:
-    log_run(spark, catalog, ops_schema, run_ctx_fs, layer="GOLD", table="fact_repo_snapshot", repo="ALL", entity="repo_metadata")
 
 # COMMAND ----------
 
@@ -364,8 +306,7 @@ finally:
 
 # COMMAND ----------
 
-run_ctx_daily = start_run(dbutils, batch_id)
-try:
+with log_run(spark, layer="GOLD", parameter="table=fact_repo_daily_activity,repo=ALL,entity=daily_activity", batch_id=batch_id, catalog=catalog) as run_ctx_daily:
     # Always read full base Gold tables to ensure complete calendar spine and rolling window math
     t_gold_fc = spark.table(f"{catalog}.{gold_schema}.fact_commits")
     t_gold_fi = spark.table(f"{catalog}.{gold_schema}.fact_issues")
@@ -391,21 +332,15 @@ try:
 
     ins_daily, upd_daily = merge_delta(
         spark,
-        f"{catalog}.{gold_schema}.fact_repo_daily_activity",
         df_fact_daily,
+        f"{catalog}.{gold_schema}.fact_repo_daily_activity",
         ["repo_key", "date_key"],
         update_all=True
     )
     run_ctx_daily["rows_inserted"] = ins_daily
     run_ctx_daily["rows_updated"] = upd_daily
     run_ctx_daily["rows_aggregated"] = ins_daily + upd_daily
-    end_run(run_ctx_daily, "SUCCESS")
     print(f"  ✓ fact_repo_daily_activity merged: {ins_daily} inserted, {upd_daily} updated ({ins_daily + upd_daily} aggregated)")
-except Exception as e:
-    end_run(run_ctx_daily, "FAILED", str(e))
-    raise e
-finally:
-    log_run(spark, catalog, ops_schema, run_ctx_daily, layer="GOLD", table="fact_repo_daily_activity", repo="ALL", entity="daily_activity")
 
 # COMMAND ----------
 

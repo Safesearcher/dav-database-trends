@@ -193,5 +193,125 @@ class TestCommonFunctions(unittest.TestCase):
         self.assertEqual(logged_row[10], "NO_DATA")
 
 
+class TestGoldNotebookSignatures(unittest.TestCase):
+    """Smoke-test that every helper used by 05_silver_to_gold.py accepts the
+    exact argument forms the notebook passes.  A signature change in common.py
+    that would blow up on Databricks will fail here first."""
+
+    def _make_mock_spark(self):
+        """Return a MagicMock that satisfies merge_delta's spark.catalog.tableExists check."""
+        mock_spark = mock.MagicMock()
+        # tableExists returns False → merge_delta takes the write-new-table path
+        mock_spark.catalog.tableExists.return_value = False
+        # df.write chain: write.format().mode().option().saveAsTable()
+        mock_spark.createDataFrame.return_value = mock.MagicMock()
+        return mock_spark
+
+    def test_start_run_gold_signature(self):
+        """start_run(spark, layer, parameter, batch_id, catalog) — as called by the Gold notebook."""
+        from src.common import start_run
+        ctx = start_run(
+            spark=None,        # spark object (None acceptable locally)
+            layer="GOLD",
+            parameter="table=dim_repo,repo=ALL,entity=repo_metadata",
+            batch_id="gold_test_batch",
+            catalog="workspace",
+        )
+        self.assertEqual(ctx["layer"], "GOLD")
+        self.assertEqual(ctx["parameter"], "table=dim_repo,repo=ALL,entity=repo_metadata")
+        self.assertEqual(ctx["batch_id"], "gold_test_batch")
+        self.assertEqual(ctx["catalog"], "workspace")
+        self.assertIn("log_id", ctx)
+        self.assertIn("start_time", ctx)
+
+    def test_log_run_context_manager_gold_signature(self):
+        """log_run(spark, layer, parameter, batch_id, catalog) used as `with` — Gold notebook pattern."""
+        from src.common import log_run
+        mock_spark = self._make_mock_spark()
+
+        with log_run(
+            mock_spark,
+            layer="GOLD",
+            parameter="table=fact_commits,repo=ALL,entity=commits",
+            batch_id="gold_test_batch",
+            catalog="workspace",
+        ) as run_ctx:
+            run_ctx["rows_inserted"] = 42
+            run_ctx["rows_updated"] = 7
+
+        # createDataFrame was called → log row was built successfully
+        self.assertTrue(mock_spark.createDataFrame.called)
+        logged_row = mock_spark.createDataFrame.call_args[0][0][0]
+        self.assertEqual(logged_row[1], "GOLD")   # layer
+        self.assertEqual(logged_row[6], "SUCCESS") # status
+        self.assertEqual(logged_row[7], 42)        # rows_inserted
+        self.assertEqual(logged_row[8], 7)         # rows_updated
+
+    def test_log_run_context_manager_rows_aggregated(self):
+        """rows_aggregated field used by fact_repo_daily_activity block."""
+        from src.common import log_run
+        mock_spark = self._make_mock_spark()
+
+        with log_run(
+            mock_spark,
+            layer="GOLD",
+            parameter="table=fact_repo_daily_activity,repo=ALL,entity=daily_activity",
+            batch_id="gold_test_batch",
+            catalog="workspace",
+        ) as run_ctx:
+            run_ctx["rows_inserted"] = 100
+            run_ctx["rows_updated"] = 50
+            run_ctx["rows_aggregated"] = 150   # ins + upd, as set in notebook 05
+
+        logged_row = mock_spark.createDataFrame.call_args[0][0][0]
+        self.assertEqual(logged_row[9], 150)   # rows_aggregated
+        self.assertEqual(logged_row[6], "SUCCESS")
+
+    def test_log_run_context_manager_failure_path(self):
+        """log_run context manager re-raises and logs FAILURE when body raises."""
+        from src.common import log_run
+        mock_spark = self._make_mock_spark()
+
+        with self.assertRaises(RuntimeError):
+            with log_run(
+                mock_spark,
+                layer="GOLD",
+                parameter="table=dim_actor,repo=ALL,entity=actors",
+                batch_id="gold_test_batch",
+                catalog="workspace",
+            ) as run_ctx:
+                run_ctx["rows_inserted"] = 0
+                raise RuntimeError("simulated transform failure")
+
+        logged_row = mock_spark.createDataFrame.call_args[0][0][0]
+        self.assertEqual(logged_row[6], "FAILURE")
+        self.assertIn("simulated transform failure", logged_row[10])
+
+    def test_merge_delta_signature_df_before_target_table(self):
+        """merge_delta(spark, df, target_table, keys, update_all) — df comes before target_table."""
+        from src.common import merge_delta
+        mock_spark = self._make_mock_spark()
+
+        # Build a mock DataFrame with a write chain
+        mock_df = mock.MagicMock()
+        mock_df.count.return_value = 5
+        write_chain = mock.MagicMock()
+        mock_df.write = write_chain
+        write_chain.format.return_value = write_chain
+        write_chain.mode.return_value = write_chain
+        write_chain.option.return_value = write_chain
+
+        ins, upd = merge_delta(
+            mock_spark,          # spark
+            mock_df,             # df  ← must be 2nd positional arg
+            "workspace.gold.dim_repo",  # target_table ← 3rd positional arg
+            ["repo_key"],        # keys
+            update_all=True,
+        )
+        # tableExists returned False → write-new-table path → inserted == df.count()
+        self.assertEqual(ins, 5)
+        self.assertEqual(upd, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
