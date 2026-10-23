@@ -6,13 +6,14 @@ Covers:
 2. Coverage of all 10 target repositories in REPO_DB_MAPPING (fails if any repo unmapped)
 3. dim_repo enrichment with db_type and db_category
 4. dim_date spine generation, temporal attributes, and analysis window tagging
-5. dim_actor unknown handling and FAISS-style null-login fallback to email_hash
-6. fact_commits construction and PII avoidance
-7. fact_issues time_to_close_hours defensive behavior (null if open, never negative)
-8. fact_pull_requests hours_to_merge defensive behavior (null if unmerged, never negative)
+5. dim_actor unknown handling, FAISS-style null-login fallback to email_hash,
+   and max(author_id) dedup when same login appears in commits (has author_id) and PRs (no author_id)
+6. fact_commits construction and PII avoidance — uses SILVER_COMMITS_SCHEMA (commit_date_utc)
+7. fact_issues label_count derived from labels_list ARRAY, time_to_close_hours defensive behavior
+8. fact_pull_requests hours_to_merge defensive behavior — SILVER schema has no author_id
 9. fact_releases days_since_previous_release window lag calculation
 10. fact_repo_snapshot metric preservation and idempotent keying
-11. fact_repo_daily_activity dense calendar spine, rolling 4-week / 12-week metrics, and total reconciliation with base facts
+11. fact_repo_daily_activity dense calendar spine, rolling 4-week / 12-week metrics, and total reconciliation
 """
 
 import os
@@ -53,6 +54,7 @@ try:
         BooleanType,
         TimestampType,
         DoubleType,
+        ArrayType,
     )
 
     spark = (
@@ -106,7 +108,8 @@ class TestGoldTransforms(unittest.TestCase):
 
     @unittest.skipUnless(HAS_SPARK, "PySpark not available")
     def test_dim_repo_enrichment(self):
-        """Test verifies silver.repo_metadata is transformed into gold.dim_repo with db_type and db_category."""
+        """Test verifies silver.repo_metadata is transformed into gold.dim_repo with db_type and db_category.
+        Uses SILVER_REPO_METADATA_SCHEMA so a wrong column name fails immediately."""
         from src.schemas import SILVER_REPO_METADATA_SCHEMA
         now = datetime.now(timezone.utc)
         data = [
@@ -148,19 +151,20 @@ class TestGoldTransforms(unittest.TestCase):
 
     @unittest.skipUnless(HAS_SPARK, "PySpark not available")
     def test_dim_actor_identity_resolution(self):
-        """Test verifies login priority, null-login fallback to email_hash (FAISS), and unknown member row."""
+        """Test verifies login priority, null-login fallback to email_hash (FAISS), and unknown member row.
+        Uses SILVER_COMMITS_SCHEMA so column-name drift in the schema is caught immediately."""
+        from src.schemas import SILVER_COMMITS_SCHEMA
+        now = datetime.now(timezone.utc)
+        # Build commit rows matching SILVER_COMMITS_SCHEMA column order:
+        # repo_full_name, commit_sha, author_login, author_id, author_email_hash,
+        # committer_email_hash, commit_date_utc, commit_headline, comment_count, is_bot,
+        # _source_file, load_timestamp
         c_data = [
-            ("alice", 101, "hash_aaa", False),                # normal user with login
-            (None, None, "hash_meta_employee", False),         # FAISS contributor with null login
-            ("dependabot[bot]", 202, "hash_dep", True),        # bot account
+            ("facebookresearch/faiss", "sha_a", "alice",            101,  "hash_aaa",          "hash_com_a", now, "Fix A", 0, False, "f1", now),
+            ("facebookresearch/faiss", "sha_b", None,               None, "hash_meta_employee", "hash_com_b", now, "Fix B", 0, False, "f2", now),
+            ("facebookresearch/faiss", "sha_c", "dependabot[bot]",  202,  "hash_dep",           "hash_com_c", now, "Bump", 0, True,  "f3", now),
         ]
-        c_schema = StructType([
-            StructField("author_login", StringType(), True),
-            StructField("author_id", LongType(), True),
-            StructField("author_email_hash", StringType(), True),
-            StructField("is_bot", BooleanType(), False),
-        ])
-        df_commits = spark.createDataFrame(c_data, schema=c_schema)
+        df_commits = spark.createDataFrame(c_data, schema=SILVER_COMMITS_SCHEMA)
         dim_actor = build_dim_actor(df_commits=df_commits, spark=spark)
 
         actors = {r["actor_identity"]: r for r in dim_actor.collect()}
@@ -179,18 +183,58 @@ class TestGoldTransforms(unittest.TestCase):
         self.assertFalse(actors["unknown"]["is_bot"])
 
     @unittest.skipUnless(HAS_SPARK, "PySpark not available")
+    def test_dim_actor_max_author_id_dedup(self):
+        """Verify that when the same login appears in both commits (has author_id) and PRs (no author_id),
+        the consolidated dim_actor row carries the non-null author_id from commits (max wins over NULL).
+        Also confirms actor_key PK uniqueness — exactly ONE row per actor_key."""
+        from src.schemas import SILVER_COMMITS_SCHEMA, SILVER_PULL_REQUESTS_SCHEMA
+        now = datetime.now(timezone.utc)
+
+        # Commit row for 'alice' with author_id=101
+        c_data = [
+            ("redis/redis", "sha_r1", "alice", 101, "hash_alice", "hash_c", now, "commit 1", 0, False, "f1", now),
+        ]
+        df_commits = spark.createDataFrame(c_data, schema=SILVER_COMMITS_SCHEMA)
+
+        # PR row for same 'alice' — PRs have NO author_id column in Silver
+        # repo_full_name, pr_number, pr_id, title, state, author_login, is_bot,
+        # created_at_utc, updated_at_utc, closed_at_utc, merged_at_utc, is_merged,
+        # merge_commit_sha, head_branch, base_branch, _source_file, load_timestamp
+        p_data = [
+            ("redis/redis", 1, 10001, "PR 1", "closed", "alice", False,
+             now, now, now, now, True, "sha_merge", "feat", "main", "f2", now),
+        ]
+        df_pulls = spark.createDataFrame(p_data, schema=SILVER_PULL_REQUESTS_SCHEMA)
+
+        dim_actor = build_dim_actor(df_commits=df_commits, df_pulls=df_pulls, spark=spark)
+        actors = {r["actor_identity"]: r for r in dim_actor.collect()}
+
+        # alice should appear exactly once
+        self.assertIn("alice", actors)
+        alice = actors["alice"]
+        # max(author_id) picks 101 (from commits) over NULL (from PRs)
+        self.assertEqual(alice["author_id"], 101)
+        self.assertEqual(alice["identity_source"], "login")
+
+        # PK uniqueness: no duplicate actor_key values
+        all_rows = dim_actor.collect()
+        all_keys = [r["actor_key"] for r in all_rows]
+        self.assertEqual(len(all_keys), len(set(all_keys)), "Duplicate actor_key values found in dim_actor")
+
+    @unittest.skipUnless(HAS_SPARK, "PySpark not available")
     def test_fact_commits_and_pii_absence(self):
-        """Test verifies fact_commits mapping and ensures no raw emails or plaintext names exist."""
+        """Test verifies fact_commits mapping and ensures no raw emails or plaintext names exist.
+        Uses SILVER_COMMITS_SCHEMA — commit_date_utc is the correct column name."""
+        from src.schemas import SILVER_COMMITS_SCHEMA
         t1 = datetime(2026, 5, 1, 12, 0, 0, tzinfo=timezone.utc)
+        # Column order from SILVER_COMMITS_SCHEMA:
+        # repo_full_name, commit_sha, author_login, author_id, author_email_hash,
+        # committer_email_hash, commit_date_utc, commit_headline, comment_count, is_bot,
+        # _source_file, load_timestamp
         data = [
-            ("sha123", "redis/redis", "hash_red", "hash_com", "antirez", 50, t1, "Fix memory leak", 2, False),
+            ("redis/redis", "sha123", "antirez", 50, "hash_red", "hash_com", t1, "Fix memory leak", 2, False, "f1", t1),
         ]
-        cols = [
-            "commit_sha", "repo_full_name", "author_email_hash", "committer_email_hash",
-            "author_login", "author_id", "committed_at_utc", "message_headline",
-            "comment_count", "is_bot"
-        ]
-        df_silver_commits = spark.createDataFrame(data, cols)
+        df_silver_commits = spark.createDataFrame(data, schema=SILVER_COMMITS_SCHEMA)
         fact_commits = build_fact_commits(df_silver_commits, window_since="2026-04-01", window_until="2026-09-30")
 
         row = fact_commits.collect()[0]
@@ -201,54 +245,62 @@ class TestGoldTransforms(unittest.TestCase):
         self.assertNotIn("author_name", fact_commits.columns)
 
     @unittest.skipUnless(HAS_SPARK, "PySpark not available")
-    def test_fact_issues_cycle_times_and_defensiveness(self):
-        """Test verifies fact_issues time_to_close_hours calculation: null if open, never negative."""
-        t_open = datetime(2026, 5, 1, 10, 0, 0, tzinfo=timezone.utc)
-        t_close_valid = datetime(2026, 5, 2, 10, 0, 0, tzinfo=timezone.utc)  # exactly 24.0 hours
-        t_close_bad = datetime(2026, 5, 1, 9, 0, 0, tzinfo=timezone.utc)     # negative clock skew
+    def test_fact_issues_label_count_from_array_and_cycle_times(self):
+        """Test verifies:
+        - label_count is derived from labels_list ARRAY (not a pre-existing column)
+        - null labels_list → label_count = 0 (not -1)
+        - time_to_close_hours: null if open, never negative
+        Uses SILVER_ISSUES_SCHEMA so schema drift is caught immediately."""
+        from src.schemas import SILVER_ISSUES_SCHEMA
+        t_open  = datetime(2026, 5, 1, 10, 0, 0, tzinfo=timezone.utc)
+        t_close = datetime(2026, 5, 2, 10, 0, 0, tzinfo=timezone.utc)  # exactly 24 h
+        t_bad   = datetime(2026, 5, 1,  9, 0, 0, tzinfo=timezone.utc)  # negative skew
 
+        # Column order from SILVER_ISSUES_SCHEMA:
+        # repo_full_name, issue_number, issue_id, title, state, author_login, author_id, is_bot,
+        # created_at_utc, updated_at_utc, closed_at_utc, comments_count, labels_list,
+        # _source_file, load_timestamp
         data = [
-            (1, "surrealdb/surrealdb", 101, "Bug 1", "closed", t_open, t_open, t_close_valid, "user1", 1, 5, 2, False),
-            (2, "surrealdb/surrealdb", 102, "Bug 2", "open", t_open, t_open, None, "user2", 2, 0, 1, False),
-            (3, "surrealdb/surrealdb", 103, "Bug 3", "closed", t_open, t_open, t_close_bad, "user3", 3, 1, 1, False),
+            ("surrealdb/surrealdb", 101, 1001, "Bug 1", "closed", "user1", 1, False, t_open, t_open, t_close, 5, ["bug", "perf"], "f1", t_open),
+            ("surrealdb/surrealdb", 102, 1002, "Bug 2", "open",   "user2", 2, False, t_open, t_open, None,    0, None,             "f2", t_open),
+            ("surrealdb/surrealdb", 103, 1003, "Bug 3", "closed", "user3", 3, False, t_open, t_open, t_bad,   1, [],               "f3", t_open),
         ]
-        cols = [
-            "issue_id", "repo_full_name", "issue_number", "title_scrubbed", "state",
-            "created_at_utc", "updated_at_utc", "closed_at_utc", "author_login",
-            "author_id", "comments_count", "label_count", "is_bot"
-        ]
-        df_issues = spark.createDataFrame(data, cols)
+        df_issues = spark.createDataFrame(data, schema=SILVER_ISSUES_SCHEMA)
         fact_issues = build_fact_issues(df_issues)
 
         rows = {r["issue_number"]: r for r in fact_issues.collect()}
 
-        # Issue 1: closed in 24 hours
+        # Issue 101: closed in 24 hours, 2 labels
         self.assertAlmostEqual(rows[101]["time_to_close_hours"], 24.0, places=1)
         self.assertFalse(rows[101]["is_open"])
+        self.assertEqual(rows[101]["label_count"], 2)
 
-        # Issue 2: open issue has null time_to_close_hours and is_open=True
+        # Issue 102: open → null close time, null label_count (labels_list IS NULL → 0)
         self.assertIsNone(rows[102]["time_to_close_hours"])
         self.assertTrue(rows[102]["is_open"])
+        self.assertEqual(rows[102]["label_count"], 0)  # null array → 0, not -1
 
-        # Issue 3: bad negative duration clamped to 0.0
+        # Issue 103: bad negative duration clamped to 0.0; empty array → 0 labels
         self.assertEqual(rows[103]["time_to_close_hours"], 0.0)
+        self.assertEqual(rows[103]["label_count"], 0)
 
     @unittest.skipUnless(HAS_SPARK, "PySpark not available")
     def test_fact_pull_requests_hours_to_merge_defensiveness(self):
-        """Test verifies fact_pull_requests hours_to_merge calculation: null if not merged, never negative."""
-        t_open = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+        """Test verifies fact_pull_requests hours_to_merge calculation: null if not merged, never negative.
+        Uses SILVER_PULL_REQUESTS_SCHEMA — no author_id column present."""
+        from src.schemas import SILVER_PULL_REQUESTS_SCHEMA
+        t_open  = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
         t_merge = datetime(2026, 6, 1, 18, 0, 0, tzinfo=timezone.utc)  # 6.0 hours
 
+        # Column order from SILVER_PULL_REQUESTS_SCHEMA:
+        # repo_full_name, pr_number, pr_id, title, state, author_login, is_bot,
+        # created_at_utc, updated_at_utc, closed_at_utc, merged_at_utc, is_merged,
+        # merge_commit_sha, head_branch, base_branch, _source_file, load_timestamp
         data = [
-            (10, "qdrant/qdrant", 501, "PR 1", "closed", t_open, t_open, t_merge, t_merge, "dev", 1, 3, True, False),
-            (20, "qdrant/qdrant", 502, "PR 2", "closed", t_open, t_open, t_merge, None, "dev", 1, 1, False, False),
+            ("qdrant/qdrant", 501, 5001, "PR 1", "closed", "dev", False, t_open, t_open, t_merge, t_merge, True,  "sha_m", "feat", "main", "f1", t_open),
+            ("qdrant/qdrant", 502, 5002, "PR 2", "closed", "dev", False, t_open, t_open, t_merge, None,    False, None,    "feat", "main", "f2", t_open),
         ]
-        cols = [
-            "pr_id", "repo_full_name", "pr_number", "title_scrubbed", "state",
-            "created_at_utc", "updated_at_utc", "closed_at_utc", "merged_at_utc",
-            "author_login", "author_id", "comments_count", "is_merged", "is_bot"
-        ]
-        df_pulls = spark.createDataFrame(data, cols)
+        df_pulls = spark.createDataFrame(data, schema=SILVER_PULL_REQUESTS_SCHEMA)
         fact_pulls = build_fact_pull_requests(df_pulls)
 
         rows = {r["pr_number"]: r for r in fact_pulls.collect()}
@@ -259,21 +311,22 @@ class TestGoldTransforms(unittest.TestCase):
 
     @unittest.skipUnless(HAS_SPARK, "PySpark not available")
     def test_fact_releases_cadence_lag(self):
-        """Test verifies days_since_previous_release computes lag accurately per repository."""
-        t1 = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        """Test verifies days_since_previous_release computes lag accurately per repository.
+        Uses SILVER_RELEASES_SCHEMA."""
+        from src.schemas import SILVER_RELEASES_SCHEMA
+        t1 = datetime(2026, 1, 1,  0, 0, 0, tzinfo=timezone.utc)
         t2 = datetime(2026, 1, 11, 0, 0, 0, tzinfo=timezone.utc)  # 10 days later
         t3 = datetime(2026, 1, 31, 0, 0, 0, tzinfo=timezone.utc)  # 20 days later
 
+        # Column order from SILVER_RELEASES_SCHEMA:
+        # repo_full_name, release_id, tag_name, release_name, is_draft, is_prerelease,
+        # published_at_utc, assets_count, _source_file, load_timestamp
         data = [
-            (1, "milvus-io/milvus", "v2.0", "v2.0", t1, t1, False, False, 5),
-            (2, "milvus-io/milvus", "v2.1", "v2.1", t2, t2, False, False, 5),
-            (3, "milvus-io/milvus", "v2.2", "v2.2", t3, t3, False, False, 5),
+            ("milvus-io/milvus", 1, "v2.0", "v2.0 release", False, False, t1, 5, "f1", t1),
+            ("milvus-io/milvus", 2, "v2.1", "v2.1 release", False, False, t2, 5, "f2", t2),
+            ("milvus-io/milvus", 3, "v2.2", "v2.2 release", False, False, t3, 5, "f3", t3),
         ]
-        cols = [
-            "release_id", "repo_full_name", "tag_name", "name",
-            "created_at_utc", "published_at_utc", "is_draft", "is_prerelease", "assets_count"
-        ]
-        df_releases = spark.createDataFrame(data, cols)
+        df_releases = spark.createDataFrame(data, schema=SILVER_RELEASES_SCHEMA)
         fact_releases = build_fact_releases(df_releases)
 
         rows = {r["release_id"]: r for r in fact_releases.collect()}
@@ -289,57 +342,30 @@ class TestGoldTransforms(unittest.TestCase):
         2. Rolling 4-week window calculates accurately across empty days
         3. Activity totals reconcile with base fact totals
         """
-        # Dim repo with single test repo
-        from src.schemas import GOLD_DIM_REPO_SCHEMA
+        from src.schemas import GOLD_DIM_REPO_SCHEMA, GOLD_FACT_COMMITS_SCHEMA, GOLD_FACT_ISSUES_SCHEMA, GOLD_FACT_PULL_REQUESTS_SCHEMA, GOLD_FACT_RELEASES_SCHEMA
         now = datetime.now(timezone.utc)
         test_key = 123456789
+
+        # dim_repo from GOLD_DIM_REPO_SCHEMA
         repo_data = [(test_key, 1, "redis/redis", "redis", "redis", "desc", "main", "BSD", now, "NoSQL", "Key-Value", now)]
         df_dim_repo = spark.createDataFrame(repo_data, schema=GOLD_DIM_REPO_SCHEMA)
-        repo_key = test_key
 
         # Dim date spine covering 35 days (2026-05-01 to 2026-06-04)
         df_dim_date = build_dim_date(spark, start_date_str="2026-05-01", end_date_str="2026-06-04")
 
-        # Commits: 5 human commits on 2026-05-01, 3 human commits on 2026-05-15, 2 bot commits on 2026-05-15
-        commits_data = [
-            (repo_key, 20260501, 101, f"sha_h_{i}", 0, False, True, now) for i in range(5)
-        ] + [
-            (repo_key, 20260515, 102, f"sha_h2_{i}", 0, False, True, now) for i in range(3)
-        ] + [
-            (repo_key, 20260515, 999, f"sha_b_{i}", 0, True, True, now) for i in range(2)
-        ]
-        cols_commits = ["repo_key", "date_key", "actor_key", "commit_sha", "comment_count", "is_bot", "in_analysis_window", "load_timestamp"]
-        df_fact_commits = spark.createDataFrame(commits_data, cols_commits)
+        # Commits fact rows using GOLD_FACT_COMMITS_SCHEMA:
+        # repo_key, date_key, actor_key, commit_sha, comment_count, is_bot, in_analysis_window, load_timestamp
+        commits_data = (
+            [(test_key, 20260501, 101, f"sha_h_{i}",  0, False, True, now) for i in range(5)] +
+            [(test_key, 20260515, 102, f"sha_h2_{i}", 0, False, True, now) for i in range(3)] +
+            [(test_key, 20260515, 999, f"sha_b_{i}",  0, True,  True, now) for i in range(2)]
+        )
+        df_fact_commits = spark.createDataFrame(commits_data, schema=GOLD_FACT_COMMITS_SCHEMA)
 
-        # Empty issues, pulls, releases
-        schema_issues = StructType([
-            StructField("repo_key", LongType()), StructField("created_date_key", IntegerType()),
-            StructField("closed_date_key", IntegerType()), StructField("actor_key", LongType()),
-            StructField("issue_number", IntegerType()), StructField("state", StringType()),
-            StructField("is_open", BooleanType()), StructField("comments_count", IntegerType()),
-            StructField("label_count", IntegerType()), StructField("time_to_close_hours", DoubleType()),
-            StructField("in_analysis_window", BooleanType()), StructField("load_timestamp", TimestampType())
-        ])
-        df_fact_issues = spark.createDataFrame([], schema_issues)
-
-        schema_pulls = StructType([
-            StructField("repo_key", LongType()), StructField("created_date_key", IntegerType()),
-            StructField("closed_date_key", IntegerType()), StructField("merged_date_key", IntegerType()),
-            StructField("actor_key", LongType()), StructField("pr_number", IntegerType()),
-            StructField("is_merged", BooleanType()), StructField("is_bot", BooleanType()),
-            StructField("hours_to_merge", DoubleType()), StructField("in_analysis_window", BooleanType()),
-            StructField("load_timestamp", TimestampType())
-        ])
-        df_fact_pulls = spark.createDataFrame([], schema_pulls)
-
-        schema_releases = StructType([
-            StructField("repo_key", LongType()), StructField("published_date_key", IntegerType()),
-            StructField("release_id", LongType()), StructField("tag_name", StringType()),
-            StructField("is_prerelease", BooleanType()), StructField("is_draft", BooleanType()),
-            StructField("assets_count", IntegerType()), StructField("days_since_previous_release", DoubleType()),
-            StructField("in_analysis_window", BooleanType()), StructField("load_timestamp", TimestampType())
-        ])
-        df_fact_releases = spark.createDataFrame([], schema_releases)
+        # Empty issues, pulls, releases — use Gold schemas so column lists are authoritative
+        df_fact_issues   = spark.createDataFrame([], schema=GOLD_FACT_ISSUES_SCHEMA)
+        df_fact_pulls    = spark.createDataFrame([], schema=GOLD_FACT_PULL_REQUESTS_SCHEMA)
+        df_fact_releases = spark.createDataFrame([], schema=GOLD_FACT_RELEASES_SCHEMA)
 
         df_daily = build_fact_repo_daily_activity(
             df_fact_commits=df_fact_commits,

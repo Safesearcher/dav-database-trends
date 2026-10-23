@@ -251,7 +251,7 @@ def build_dim_actor(
             df_pulls
             .select(
                 F.col("author_login"),
-                F.col("author_id").cast(LongType()),
+                F.lit(None).cast(LongType()).alias("author_id"),  # PRs have no author_id column
                 F.lit(None).cast(StringType()).alias("author_email_hash"),
                 F.col("is_bot"),
             )
@@ -278,13 +278,15 @@ def build_dim_actor(
         )
     )
 
-    # Group by actor_identity to consolidate multiple appearances and get canonical attributes
+    # Group by actor_identity to consolidate multiple appearances and get canonical attributes.
+    # max(author_id) ensures the non-null value from commits/issues wins over NULL from PRs
+    # when the same login appears across multiple Silver sources.
     consolidated = (
         annotated
         .groupBy("actor_identity")
         .agg(
             F.first("author_login", ignorenulls=True).alias("author_login"),
-            F.first("author_id", ignorenulls=True).alias("author_id"),
+            F.max("author_id").alias("author_id"),  # max picks non-null over NULL
             F.first("author_email_hash", ignorenulls=True).alias("author_email_hash"),
             F.first("identity_source", ignorenulls=True).alias("identity_source"),
             F.max("is_bot").alias("is_bot"),
@@ -360,12 +362,12 @@ def build_fact_commits(
     return (
         df_silver_commits
         .withColumn("repo_key", compute_repo_key("repo_full_name"))
-        .withColumn("date_key", compute_date_key("committed_at_utc"))
+        .withColumn("date_key", compute_date_key("commit_date_utc"))  # Silver column is commit_date_utc
         .withColumn("actor_key", compute_actor_key(actor_id_expr))
         .withColumn(
             "in_analysis_window",
-            (F.to_date("committed_at_utc") >= F.to_date(F.lit(w_since))) &
-            (F.to_date("committed_at_utc") <= F.to_date(F.lit(w_until)))
+            (F.to_date("commit_date_utc") >= F.to_date(F.lit(w_since))) &  # Silver column is commit_date_utc
+            (F.to_date("commit_date_utc") <= F.to_date(F.lit(w_until)))
         )
         .select(
             "repo_key",
@@ -427,7 +429,10 @@ def build_fact_issues(
             F.col("state"),
             "is_open",
             F.coalesce(F.col("comments_count"), F.lit(0)).cast(IntegerType()).alias("comments_count"),
-            F.coalesce(F.col("label_count"), F.lit(0)).cast(IntegerType()).alias("label_count"),
+            # labels_list is ARRAY<STRING> on Databricks; F.size(null) can return -1, so guard explicitly
+            F.when(F.col("labels_list").isNull(), F.lit(0))
+             .otherwise(F.size(F.col("labels_list")))
+             .cast(IntegerType()).alias("label_count"),
             "time_to_close_hours",
             F.coalesce(F.col("in_analysis_window"), F.lit(False)).alias("in_analysis_window"),
             F.current_timestamp().alias("load_timestamp"),
