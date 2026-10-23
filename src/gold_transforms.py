@@ -74,6 +74,19 @@ ALL_10_REPOS = sorted(list(REPO_DB_MAPPING.keys()))
 DEFAULT_ANALYSIS_WINDOW_START = "2026-04-01"
 DEFAULT_ANALYSIS_WINDOW_END = "2026-09-30"
 
+# dim_date calendar spine extents.
+# DIM_DATE_START: 2008-01-01 — GitHub's founding year; covers the earliest possible
+# issue/release creation dates returned by GitHub's `since`-filtered API endpoints
+# (which filter by *updated* date, not creation date).
+# DIM_DATE_END: 2027-12-31 — end of the current planning horizon.
+# DIM_DATE_ACTIVITY_SPINE_START: 2020-01-01 — the floor used by build_fact_repo_daily_activity
+# for its dense cross-join spine. Extending the full dim_date spine back to 2008 would add
+# ~12 years × 10 repos = ~43,800 zero-activity rows to that aggregate fact table, which
+# would balloon storage and query cost without analytical value.
+DIM_DATE_START: str = "2008-01-01"
+DIM_DATE_END: str = "2027-12-31"
+DIM_DATE_ACTIVITY_SPINE_START: str = "2020-01-01"
+
 
 # =============================================================================
 # 2. Key Generation Helpers
@@ -153,8 +166,8 @@ def build_dim_repo(df_silver_repo_metadata: DataFrame) -> DataFrame:
 
 def build_dim_date(
     spark: SparkSession,
-    start_date_str: str = "2020-01-01",
-    end_date_str: str = "2027-01-01",
+    start_date_str: str = DIM_DATE_START,
+    end_date_str: str = DIM_DATE_END,
     window_since: str = DEFAULT_ANALYSIS_WINDOW_START,
     window_until: str = DEFAULT_ANALYSIS_WINDOW_END,
 ) -> DataFrame:
@@ -607,10 +620,17 @@ def build_fact_repo_daily_activity(
        The dense spine guarantees that days without activity count as zero and do not distort
        the rolling sums.
     """
-    # Step 1: Build dense spine
+    # Step 1: Build dense spine.
+    # Guard the cross-join to DIM_DATE_ACTIVITY_SPINE_START (2020-01-01).
+    # dim_date may now span back to 2008 to resolve orphan FK keys from old issues/releases,
+    # but including those 12 extra years in the cross-join would produce ~43,800 zero-activity
+    # rows (10 repos × ~4,383 days) with no analytical value and significant storage cost.
+    df_dim_date_spine = df_dim_date.filter(
+        F.col("full_date") >= F.to_date(F.lit(DIM_DATE_ACTIVITY_SPINE_START))
+    )
     spine = (
         df_dim_repo.select("repo_key")
-        .crossJoin(df_dim_date.select("date_key", "full_date", "in_analysis_window"))
+        .crossJoin(df_dim_date_spine.select("date_key", "full_date", "in_analysis_window"))
     )
 
     # Step 2: Commits aggregate

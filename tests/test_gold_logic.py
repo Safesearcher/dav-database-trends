@@ -23,6 +23,9 @@ from datetime import datetime, timezone, date
 from src.gold_transforms import (
     REPO_DB_MAPPING,
     ALL_10_REPOS,
+    DIM_DATE_START,
+    DIM_DATE_END,
+    DIM_DATE_ACTIVITY_SPINE_START,
     compute_repo_key,
     compute_date_key,
     compute_actor_identity,
@@ -130,7 +133,8 @@ class TestGoldTransforms(unittest.TestCase):
 
     @unittest.skipUnless(HAS_SPARK, "PySpark not available")
     def test_dim_date_spine_and_window_flags(self):
-        """Test verifies calendar spine generation and in_analysis_window boundary logic."""
+        """Test verifies calendar spine generation and in_analysis_window boundary logic.
+        Uses an explicit small range to avoid generating years of data in local tests."""
         dim_date = build_dim_date(
             spark,
             start_date_str="2026-03-31",
@@ -140,6 +144,9 @@ class TestGoldTransforms(unittest.TestCase):
         )
         dates = {r["date_key"]: r for r in dim_date.collect()}
 
+        # Exactly 4 rows: 2026-03-31, 2026-04-01, 2026-04-02, 2026-04-03
+        self.assertEqual(len(dates), 4)
+
         # 2026-03-31 should be outside window
         self.assertFalse(dates[20260331]["in_analysis_window"])
         # 2026-04-01 should be inside window
@@ -148,6 +155,56 @@ class TestGoldTransforms(unittest.TestCase):
         self.assertEqual(dates[20260401]["quarter"], 2)
         self.assertEqual(dates[20260401]["month"], 4)
         self.assertEqual(dates[20260401]["month_name"], "April")
+
+    @unittest.skipUnless(HAS_SPARK, "PySpark not available")
+    def test_dim_date_covers_historical_dates(self):
+        """Verify that the production dim_date range (DIM_DATE_START=2008-01-01 to
+        DIM_DATE_END=2027-12-31) covers pre-2020 issue and release creation dates
+        that arrive via GitHub's since-filter which matches on *updated* date.
+
+        Specifically tests:
+        - A 2012-01-15 issue created during PostgreSQL's early GitHub era.
+        - A 2018-09-12 release from early MongoDB/Redis history.
+        - That DIM_DATE_ACTIVITY_SPINE_START (2020-01-01) is still after DIM_DATE_START,
+          so the daily-activity spine guard is effective.
+        """
+        self.assertEqual(DIM_DATE_START, "2008-01-01")
+        self.assertEqual(DIM_DATE_END, "2027-12-31")
+        self.assertEqual(DIM_DATE_ACTIVITY_SPINE_START, "2020-01-01")
+
+        # Build a minimal slice that covers the two historical sentinel dates.
+        # Using a narrow range keeps local test execution fast.
+        dim_date_hist = build_dim_date(
+            spark,
+            start_date_str="2012-01-15",
+            end_date_str="2018-09-12",
+            window_since="2026-04-01",
+            window_until="2026-09-30",
+        )
+        date_keys = {r["date_key"] for r in dim_date_hist.collect()}
+
+        # 2012-01-15: early PostgreSQL/Redis GitHub issue creation dates (YYYYMMDD = 20120115)
+        self.assertIn(20120115, date_keys,
+            "dim_date must cover 20120115 to resolve orphan fact_issues.created_date_key")
+
+        # 2018-09-12: early release published_date examples (YYYYMMDD = 20180912)
+        self.assertIn(20180912, date_keys,
+            "dim_date must cover 20180912 to resolve orphan fact_releases.published_date_key")
+
+        # Validate that the full production default range generates the right row count.
+        # 2008-01-01 to 2027-12-31 inclusive:
+        # 2008 is a leap year (366), 2012 leap (366), 2016 leap (366), 2020 leap (366), 2024 leap (366).
+        # Total years 2008-2027 = 20 years. Non-leap = 15 years x 365 = 5475. Leap = 5 x 366 = 1830.
+        # Total = 5475 + 1830 = 7305 days.
+        full_dim_date = build_dim_date(
+            spark,
+            start_date_str=DIM_DATE_START,
+            end_date_str=DIM_DATE_END,
+        )
+        full_count = full_dim_date.count()
+        self.assertEqual(full_count, 7305,
+            f"dim_date for {DIM_DATE_START} to {DIM_DATE_END} should have 7305 rows, got {full_count}")
+
 
     @unittest.skipUnless(HAS_SPARK, "PySpark not available")
     def test_dim_actor_identity_resolution(self):
@@ -378,8 +435,14 @@ class TestGoldTransforms(unittest.TestCase):
 
         daily_rows = {r["date_key"]: r for r in df_daily.collect()}
 
-        # Total days should be 35
-        self.assertEqual(len(daily_rows), 35)
+        # Total days should still be 35: the cross-join uses DIM_DATE_ACTIVITY_SPINE_START
+        # (2020-01-01) as its floor, so extending dim_date back to 2008 does NOT increase
+        # the daily-activity spine. This test passes a 35-day date slice directly and
+        # confirms the count is unchanged from before the dim_date range extension.
+        self.assertEqual(len(daily_rows), 35,
+            "Daily-activity spine row count must be 35 (the 35-day date window passed in). "
+            "If this changed, check that build_fact_repo_daily_activity filters to "
+            "DIM_DATE_ACTIVITY_SPINE_START before cross-joining.")
 
         # On 2026-05-01: 5 human commits, 0 bot, rolling 4wk = 5
         self.assertEqual(daily_rows[20260501]["commits_human"], 5)

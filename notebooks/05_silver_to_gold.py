@@ -74,6 +74,8 @@ from src.gold_transforms import (
     REPO_DB_MAPPING,
     DEFAULT_ANALYSIS_WINDOW_START,
     DEFAULT_ANALYSIS_WINDOW_END,
+    DIM_DATE_START,
+    DIM_DATE_END,
     build_dim_repo,
     build_dim_date,
     build_dim_actor,
@@ -184,8 +186,8 @@ with log_run(spark, layer="GOLD", parameter="table=dim_repo,repo=ALL,entity=repo
 with log_run(spark, layer="GOLD", parameter="table=dim_date,repo=ALL,entity=calendar", batch_id=batch_id, catalog=catalog) as run_ctx_date:
     df_dim_date = build_dim_date(
         spark,
-        start_date_str="2020-01-01",
-        end_date_str="2027-01-01",
+        start_date_str=DIM_DATE_START,   # 2008-01-01: GitHub founding year, covers historical issue/release keys
+        end_date_str=DIM_DATE_END,         # 2027-12-31: current planning horizon end
         window_since=analysis_since,
         window_until=analysis_until
     )
@@ -384,14 +386,20 @@ dim_actor_keys = spark.table(f"{catalog}.{gold_schema}.dim_actor").select("actor
 
 def check_orphans(fact_name, fact_col, dim_df, dim_col, dim_name):
     f_df = spark.table(f"{catalog}.{gold_schema}.{fact_name}")
-    orphans = (
+    orphan_df = (
         f_df.filter(F.col(fact_col).isNotNull())
         .select(F.col(fact_col).alias("k"))
         .join(dim_df.select(F.col(dim_col).alias("k")), on="k", how="left_anti")
-        .count()
     )
+    orphans = orphan_df.count()
     if orphans > 0:
-        raise AssertionError(f"Quality Gate 2 Failed: {orphans} orphan keys found in {fact_name}.{fact_col} referencing {dim_name}.{dim_col}")
+        # Compute min/max to pinpoint the out-of-range key for fast debugging
+        stats = orphan_df.agg(F.min("k").alias("min_k"), F.max("k").alias("max_k")).first()
+        raise AssertionError(
+            f"Quality Gate 2 Failed: {orphans} orphan keys found in "
+            f"{fact_name}.{fact_col} referencing {dim_name}.{dim_col}. "
+            f"Orphan key range: min={stats['min_k']}, max={stats['max_k']}"
+        )
     print(f"  ✓ [Referential Integrity] {fact_name}.{fact_col} -> {dim_name}.{dim_col}: 0 orphans")
 
 check_orphans("fact_commits", "repo_key", dim_repo_keys, "repo_key", "dim_repo")

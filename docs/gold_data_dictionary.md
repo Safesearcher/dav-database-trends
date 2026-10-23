@@ -177,7 +177,9 @@ erDiagram
 ---
 
 ### 2.2 `gold.dim_date`
-* **Grain:** One row per calendar day (spanning 2020-01-01 to 2027-01-01).
+* **Grain:** One row per calendar day, spanning **2008-01-01 to 2027-12-31**.
+* **Why 2008?** GitHub was founded in April 2008. The GitHub API's `since` filter operates on an item's *last-updated* timestamp, not its creation date. This means issues opened in 2011–2019 and releases published before 2020 may surface in any incremental load whenever they receive a comment or a label change. Extending `dim_date` to 2008-01-01 guarantees that every `fact_issues.created_date_key` and `fact_releases.published_date_key` has a matching row and Quality Gate 2 (referential integrity) passes.
+* **Activity Spine Floor:** `fact_repo_daily_activity` cross-joins `dim_repo` × `dim_date` filtered to **≥ 2020-01-01** (`DIM_DATE_ACTIVITY_SPINE_START`), preventing ~43,800 zero-activity rows from being written for the 2008–2019 period.
 * **Strategy:** Pre-generated continuous calendar spine.
 * **Liquid Clustering:** `CLUSTER BY (date_key)`
 
@@ -194,7 +196,7 @@ erDiagram
 | `day_of_week` | `INT` | **No** | Day of week (`1` = Sunday through `7` = Saturday) |
 | `day_name` | `STRING` | **No** | English day name (e.g., `'Monday'`) |
 | `is_weekend` | `BOOLEAN` | **No** | True if Saturday or Sunday |
-| `in_analysis_window` | `BOOLEAN` | **No** | True if date falls within `2026-04-01` to `2026-09-30` |
+| `in_analysis_window` | `BOOLEAN` | **No** | True if date falls within the configured analysis window (default `2026-04-01` to `2026-09-30`) |
 | `load_timestamp` | `TIMESTAMP` | **No** | Medallion ETL processing timestamp in UTC |
 
 ---

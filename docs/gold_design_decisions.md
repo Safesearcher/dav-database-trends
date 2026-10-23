@@ -103,3 +103,21 @@ Committer and author emails are personal data (PII) under GDPR and privacy regul
 2. **Length Enforcing & Warning:** If the resolved salt is shorter than 16 characters, `get_salt()` outputs a non-fatal security warning advising production teams to lengthen the salt.
 3. **Secret Confidentiality:** Raw salts and plaintext email addresses are strictly prohibited from being printed to notebook cell outputs, stored in logs, or written to Delta tables.
 4. **Surrogate Identity Masking:** Contributor identity in Gold resolves to `dim_actor` where emails appear exclusively as salted SHA-256 digests (`author_email_hash`). Contributor personal names are discarded.
+
+---
+
+## 6. `dim_date` Range Extension to 2008 & Activity Spine Guard
+
+### Context
+Quality Gate 2 (Referential Integrity) failed in production with 556 orphan `fact_issues.created_date_key` rows (dates 2011-09-18 to 2019-12-26) and 12 orphan `fact_releases.published_date_key` rows (dates 2018-03-01 to 2019-12-07). The root cause is the GitHub API's `since` query parameter: it filters by an item's **last-updated** timestamp, not its creation date. An issue opened in 2012 that received a new comment in 2026 will appear in an incremental load, but its `created_at_utc` still resolves to a 2012 `date_key` that did not exist in `dim_date`.
+
+### Decision
+1. **`DIM_DATE_START = "2008-01-01"`** — Extend the lower bound of `dim_date` to GitHub's founding year (April 2008). This makes `dim_date` cover every possible `created_at_utc` / `published_at_utc` timestamp that the API can return. The full spine is 7,305 rows (2008-01-01 to 2027-12-31 inclusive).
+2. **`DIM_DATE_END = "2027-12-31"`** — End boundary updated to a proper year-end (was `2027-01-01`); reflects the current analysis planning horizon.
+3. **`DIM_DATE_ACTIVITY_SPINE_START = "2020-01-01"`** — A separate constant that guards `build_fact_repo_daily_activity`. The dense cross-join (`dim_repo × dim_date`) filters `dim_date` rows to `>= 2020-01-01` before the join, so extending the full calendar spine back to 2008 does **not** add ~43,800 zero-activity rows (10 repos × ~4,383 days) to the aggregate fact table.
+
+### Why 2020 as the Activity Spine Floor?
+Pre-2020 activity is outside the project's analytical scope (the analysis window is 2026-04-01 to 2026-09-30). Rolling window velocity metrics are meaningless for years without any ingested data. Writing zero-rows back to 2008 would increase storage and slow Power BI refresh without any analytical gain.
+
+### Named Constants
+All three bounds are module-level string constants in `src/gold_transforms.py`, imported directly by `notebooks/05_silver_to_gold.py`. Hardcoded literal dates have been eliminated from both files so a future range adjustment requires a single-file change.
