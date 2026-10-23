@@ -343,6 +343,79 @@ SELECT 'releases'      AS entity, COUNT(*) AS rows FROM silver.releases        W
 
 ---
 
+### 21 — Gold Schema in Catalog Explorer
+**File:** `21_gold_catalog_schemas.png`  
+**Where:** Databricks → Catalog Explorer → expand `workspace.gold`
+
+**Steps:**
+1. In Catalog Explorer, expand `gold` schema.
+2. Confirm all 9 tables (`dim_repo`, `dim_date`, `dim_actor`, `fact_commits`, `fact_issues`, `fact_pull_requests`, `fact_releases`, `fact_repo_snapshot`, `fact_repo_daily_activity`) and audit views are listed.
+
+**Capture:** Full Catalog tree showing the Gold tables.
+
+---
+
+### 22 — Gold Pipeline Notebook Run Success
+**File:** `22_gold_pipeline_success.png`  
+**Where:** Databricks Notebook `notebooks/05_silver_to_gold.py`
+
+**Steps:**
+1. Execute `05_silver_to_gold.py` or view execution in `04_run_pipeline.py`.
+2. Scroll to the completion cell showing `GOLD LAYER PIPELINE RUN COMPLETED SUCCESSFULLY` and JSON exit summary.
+
+**Capture:** Terminal cell output showing green success status and table counts.
+
+---
+
+### 23 — Liquid Clustering Detail & OPTIMIZE
+**File:** `23_gold_liquid_clustering_detail.png`  
+**Where:** Databricks SQL Editor / Notebook Cell
+
+**SQL to run:**
+```sql
+DESCRIBE DETAIL workspace.gold.fact_repo_daily_activity;
+```
+
+**Capture:** Result table showing `clusteringColumns = ["repo_key", "date_key"]` and `format = delta`.
+
+---
+
+### 24 — Gold Reconciliation Audit Pass
+**File:** `24_gold_reconciliation_pass.png`  
+**Where:** Databricks SQL Editor
+
+**SQL to run:**
+```sql
+SELECT table_name, silver_source_rows, gold_target_rows, delta_rows, status, check_timestamp
+FROM workspace.gold.audit_gold_reconciliation
+ORDER BY check_timestamp DESC;
+```
+
+**Capture:** Grid output displaying status `PASS` and `delta_rows = 0` for all 5 base entity pairs.
+
+---
+
+### 25 — Spark DAG for fact_repo_daily_activity
+**File:** `25_spark_dag_daily_activity.png`  
+**Where:** Databricks Spark UI → SQL/Dataframe Tab → latest `MergeInto` query
+
+**Steps:**
+1. Open Spark UI for the notebook run.
+2. Navigate to SQL/Dataframe execution details for `fact_repo_daily_activity`.
+3. Toggle graphical DAG visualization.
+
+**Capture:** Physical query plan showing Cartesian spine broadcast, aggregations, and `WindowExec` stages.
+
+---
+
+### 26 — Full Medallion Row Counts & Idempotency Proof
+**File:** `26_row_counts_all_medallion_layers.png`  
+**Where:** Databricks Notebook `notebooks/04_run_pipeline.py` Section D-4
+
+**Capture:** Output of Section D-4 asserting identical row counts and metric sums across Bronze, Silver, and Gold.
+
+---
+
 ## Progress Tracker
 
 Copy and update as you take each screenshot:
@@ -368,4 +441,10 @@ Copy and update as you take each screenshot:
 [ ] 18_bronze_delta_history.png   (nice to have)
 [ ] 19_silver_issues_cassandra_zero.png  (nice to have)
 [ ] 20_silver_issues_postgres_zero.png   (nice to have)
+[ ] 21_gold_catalog_schemas.png   (Phase 3 ⭐)
+[ ] 22_gold_pipeline_success.png  (Phase 3 ⭐)
+[ ] 23_gold_liquid_clustering_detail.png (Phase 3 ⭐)
+[ ] 24_gold_reconciliation_pass.png      (Phase 3 ⭐)
+[ ] 25_spark_dag_daily_activity.png      (Phase 3 ⭐)
+[ ] 26_row_counts_all_medallion_layers.png (Phase 3 ⭐)
 ```

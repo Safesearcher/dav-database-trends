@@ -1,8 +1,8 @@
 # DAV Database Trends — PySpark Medallion Pipeline
 
-> **University Data Analysis & Visualization — Phase 2**  
-> A production-grade PySpark Medallion pipeline (Bronze → Silver) on Databricks Free Edition,
-> tracking 10 open-source database repositories via the GitHub REST API.
+> **University Data Analysis & Visualization — Phase 3**  
+> A production-grade PySpark Medallion pipeline (**Bronze → Silver → Gold**) on Databricks Serverless,
+> tracking 10 open-source database repositories via the GitHub REST API into a star schema for BI/analytics.
 
 ---
 
@@ -14,27 +14,29 @@
 4. [Tracked Repositories](#4-tracked-repositories)
 5. [Bronze Data Dictionary](#5-bronze-data-dictionary)
 6. [Silver Data Dictionary](#6-silver-data-dictionary)
-7. [Ops Tables](#7-ops-tables)
-8. [Databricks Execution Guide](#8-databricks-execution-guide)
-   - [8.7 Ingestion (API -> Volume) on Databricks](#87-ingestion-api---volume-on-databricks)
-9. [How to Run the Pipeline](#9-how-to-run-the-pipeline)
-   - [9.1 Incremental Load (Section A)](#91-incremental-load-section-a)
-   - [9.2 Backfill of an Older Historical Period (Section B)](#92-backfill-of-an-older-historical-period-section-b)
-   - [9.3 Idempotency Proof (Section D)](#93-idempotency-proof-section-d)
-   - [9.4 Running Notebooks Standalone (02 & 03)](#94-running-notebooks-standalone-02_raw_to_bronzepy--03_bronze_to_silverpy)
-   - [9.5 Schema Drift End-to-End Test (Section C)](#95-schema-drift-end-to-end-test-section-c)
-10. [Idempotency & MERGE Strategy](#10-idempotency--merge-strategy)
-11. [Schema Drift Handling](#11-schema-drift-handling)
-12. [PII Handling](#12-pii-handling)
-13. [Known Caveats](#13-known-caveats)
-14. [Screenshots Checklist](#14-screenshots-checklist)
+7. [Gold Data Dictionary & Star Schema](#7-gold-data-dictionary--star-schema)
+8. [Ops & Audit Tables](#8-ops--audit-tables)
+9. [Databricks Execution Guide](#9-databricks-execution-guide)
+   - [9.7 Ingestion (API -> Volume) on Databricks](#97-ingestion-api---volume-on-databricks)
+10. [How to Run the Pipeline](#10-how-to-run-the-pipeline)
+   - [10.1 Incremental Load (Section A)](#101-incremental-load-section-a)
+   - [10.2 Backfill of an Older Historical Period (Section B)](#102-backfill-of-an-older-historical-period-section-b)
+   - [10.3 Idempotency Proof (Section D)](#103-idempotency-proof-section-d)
+   - [10.4 Running Notebooks Standalone (02, 03, & 05)](#104-running-notebooks-standalone-02-03--05)
+   - [10.5 Schema Drift End-to-End Test (Section C)](#105-schema-drift-end-to-end-test-section-c)
+11. [Idempotency & MERGE Strategy](#11-idempotency--merge-strategy)
+12. [Liquid Clustering & Optimization](#12-liquid-clustering--optimization)
+13. [Schema Drift Handling](#13-schema-drift-handling)
+14. [PII Handling & Security](#14-pii-handling--security)
+15. [Known Caveats](#15-known-caveats)
+16. [Screenshots Checklist](#16-screenshots-checklist)
 
 ---
 
 ## 1. Project Overview
 
 This pipeline ingests raw JSON from the **GitHub REST API** for 10 database repositories
-(relational, document, key-value, vector) into a **Medallion architecture** on
+(relational, document, key-value, distributed, vector) into a **Medallion architecture** on
 Databricks Serverless with Unity Catalog and Delta Lake.
 
 | Layer | Storage | Technology | Purpose |
@@ -42,15 +44,17 @@ Databricks Serverless with Unity Catalog and Delta Lake.
 | **Source** | GitHub REST API | `scripts/fetch_incremental.py` / `notebooks/00_ingest_github_api.py` | Pull raw JSON |
 | **Bronze** | Unity Catalog Volume → Delta | `notebooks/02_raw_to_bronze.py` | Raw, schema-validated, idempotent |
 | **Silver** | Unity Catalog Delta tables | `notebooks/03_bronze_to_silver.py` | Typed, PII-masked, deduplicated |
-| **Gold** *(Phase 3)* | Unity Catalog Delta views | TBD | Star schema for BI/analytics |
-| **Ops** | Unity Catalog Delta | `notebooks/01_setup.py` | Audit logs & quarantine |
+| **Gold** | Unity Catalog Delta tables | `notebooks/05_silver_to_gold.py` | Dimensional star schema (3 dims, 5 base facts, 1 aggregate fact with dense calendar spine) |
+| **Ops** | Unity Catalog Delta | `notebooks/01_setup.py` | Audit logs, reconciliation, & quarantine |
 
 **Design principles:**
 - Zero schema inference — all `StructType` schemas are explicit in [`src/schemas.py`](src/schemas.py)
-- Every record in Bronze and Silver carries a `load_timestamp`
-- Idempotency via `MERGE INTO` (never append-only after table creation)
-- PII masking with salted SHA-256 before data leaves Bronze
-- Full audit trail in `ops.pipeline_execution_logs`
+- Every record in Bronze, Silver, and Gold carries a `load_timestamp`
+- Idempotency via Delta `MERGE INTO` (zero duplicate records across repeated executions)
+- PII masking with salted SHA-256 before data leaves Bronze; contributor identities resolved in `dim_actor`
+- Liquid Clustering (`CLUSTER BY`) on all Gold tables for multi-dimensional data skipping
+- Continuous dense calendar spine cross-joining repositories and dates for true rolling 4-week / 12-week velocity
+- Full audit trail in `ops.pipeline_execution_logs` and parity verification in `gold.audit_gold_reconciliation`
 
 ---
 
@@ -63,20 +67,25 @@ flowchart TD
     VOL["Unity Catalog Volume\n/Volumes/workspace/bronze_data/raw/"]
     B02["02_raw_to_bronze.py\nPERMISSIVE read · explicit schema\nMERGE INTO bronze.*"]
     B03["03_bronze_to_silver.py\nPII hash · is_bot · type cast\nMERGE INTO silver.*"]
+    B05["05_silver_to_gold.py\nStar Schema · Dense Spine\nMERGE INTO gold.*"]
     BRONZE["bronze.*\nDelta tables\n(5 entities × 10 repos)"]
     SILVER["silver.*\nDelta tables\n(5 typed entities)"]
+    GOLD["gold.*\nStar Schema Tables\n(3 Dims · 5 Base Facts · 1 Agg Fact)"]
     QUAR["ops.silver_quarantine\nBad records"]
     LOGS["ops.pipeline_execution_logs\nAudit trail"]
+    RECON["gold.audit_gold_reconciliation\nParity Audit"]
     B04["04_run_pipeline.py\nOrchestrator"]
 
     GH -->|"JSON files"| VOL
     GH -->|incremental| FI --> VOL
     B04 -->|dbutils.notebook.run| B02
     B04 -->|dbutils.notebook.run| B03
-    VOL --> B02 --> BRONZE --> B03 --> SILVER
+    B04 -->|dbutils.notebook.run| B05
+    VOL --> B02 --> BRONZE --> B03 --> SILVER --> B05 --> GOLD
     B02 -->|corrupt rows| QUAR
     B03 -->|type errors / bad dates| QUAR
-    B02 & B03 --> LOGS
+    B02 & B03 & B05 --> LOGS
+    B05 --> RECON
 ```
 
 ---
@@ -87,13 +96,15 @@ flowchart TD
 dav-database-trends/
 ├── notebooks/
 │   ├── 00_ingest_github_api.py  # In-workspace GitHub REST API extraction
-│   ├── 01_setup.py              # Create UC schemas, Delta tables, ops tables
+│   ├── 01_setup.py              # Create UC schemas, Delta tables, ops tables, Gold DDL & audit views
 │   ├── 02_raw_to_bronze.py      # Raw JSON → Bronze Delta (MERGE INTO)
 │   ├── 03_bronze_to_silver.py   # Bronze → Silver (PII, is_bot, quarantine)
-│   └── 04_run_pipeline.py       # Orchestrator (incremental / backfill / drift / idempotency)
+│   ├── 04_run_pipeline.py       # Orchestrator (incremental / backfill / drift / idempotency)
+│   └── 05_silver_to_gold.py     # Silver → Gold (Star schema, dense spine aggregates, quality gates)
 ├── src/
-│   ├── schemas.py               # All explicit StructType schemas (Bronze + Silver + Ops)
+│   ├── schemas.py               # All explicit StructType schemas (Bronze + Silver + Ops + Gold)
 │   ├── common.py                # Shared helpers: get_params, log_run, merge_delta, hash_email
+│   ├── gold_transforms.py       # Pure transformation functions for Gold star schema & metrics
 │   └── ingestion/               # GitHub REST API client & helpers
 │       └── github_client.py
 ├── scripts/
@@ -110,15 +121,22 @@ dav-database-trends/
 │   └── drift/                   # Output of make_drift_sample.py (drift test data)
 ├── tests/
 │   ├── check_schemas.py         # Validate schema fields against real JSON records
-│   ├── test_schemas.py          # Unit tests for schema field coverage
+│   ├── test_schemas.py          # Unit tests for schema field coverage (Bronze, Silver, Gold)
 │   ├── test_common.py           # Unit tests for common.py helpers
 │   ├── test_github_client.py    # Unit tests for GitHub client & pagination
-│   └── test_spark_logic.py      # Unit tests for PySpark parsing, timestamps, bots, drift
+│   ├── test_spark_logic.py      # Unit tests for PySpark parsing, timestamps, bots, drift
+│   └── test_gold_logic.py       # Comprehensive unit tests for Gold star schema transforms
 ├── docs/
-│   ├── data_dictionary.md       # Full data dictionary (extended)
+│   ├── data_dictionary.md       # Bronze & Silver data dictionary
+│   ├── gold_data_dictionary.md  # Comprehensive Gold star schema data dictionary & ERD
+│   ├── gold_design_decisions.md # Architectural rationale: surrogate keys, SCD 1, clustering, dense spine
+│   ├── decision_log_source_notes.md # Traceable evidence linking design decisions to code
+│   ├── spark_dag_guide.md       # Guide for capturing and interpreting Spark DAG in Spark UI
+│   ├── finops_queries.md        # FinOps SQL queries and Serverless cost extrapolation model
+│   ├── powerbi_handoff.md       # Power BI integration guide, star relationships, DAX measures
 │   ├── proof/                   # Proof of execution & rubric mapping
 │   │   └── README.md
-│   └── screenshots/             # Required Databricks screenshots (see checklist)
+│   └── screenshots/             # Databricks screenshots checklist and instructions
 ├── audit/
 │   ├── bronze_quality_report.md # Full Bronze DQ audit
 │   └── data_quality.md          # Bronze layer data quality audit report

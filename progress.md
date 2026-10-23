@@ -2,9 +2,9 @@
 # PySpark Medallion Pipeline (Bronze → Silver → Gold)
 # University Data Analysis & Visualization — 2026
 
-**Last updated:** 2026-10-10  
-**Current branch:** `ingest-notebook`  
-**Test suite:** 51/51 tests passing ✅ (11 skipped when Spark is not present, verified locally with uv)
+**Last updated:** 2026-10-23  
+**Current branch:** `phase3-gold`  
+**Test suite:** 62/62 tests passing ✅ (10 comprehensive Gold logic unit tests, verified locally with uv)
 
 ---
 
@@ -14,10 +14,64 @@
 |---|---|---|---|
 | **Phase 1** | Data Collection & Bronze Layer Setup | ⏳ In Progress (Databricks Live Verification Pending) | 90% |
 | **Phase 2** | Silver Layer — Transformation, PII, Quality | ⏳ In Progress (Databricks Live Verification Pending) | 90% |
-| **Phase 3** | Gold Layer — Star Schema & BI Analytics | 🔲 Not started | 0% |
-| **Phase 4** | Visualizations & Final Report | 🔲 Not started | 0% |
+| **Phase 3** | Gold Layer — Star Schema & BI Analytics | ⏳ In Progress (Local Complete, Databricks Live Verification Pending) | 90% |
+| **Phase 4** | Visualizations & Final Report | 🔲 Not started (Partner Dashboard & Report Handoff) | 0% |
 
-> ⚠️ **Verification Notice:** All local unit, mock, and offline PySpark tests are passing. However, **Databricks live cluster verification is NOT marked complete** and remains strictly pending until executed against a live Databricks Serverless workspace with Unity Catalog.
+> ⚠️ **Verification Notice:** All local unit, mock, and offline PySpark tests are passing (62/62). However, **Databricks live cluster verification is NOT marked complete** and remains strictly pending until executed against a live Databricks Serverless workspace with Unity Catalog.
+
+---
+
+## ⏳ Phase 3 — Gold Layer (Local Complete, Databricks Verification Pending)
+
+### 3.1 Schemas & Core Data Models
+- [x] **`src/schemas.py`** — Added `rows_aggregated` to `PIPELINE_EXECUTION_LOGS_SCHEMA`; defined explicit `StructType` schemas for all 9 Gold tables (`DIM_REPO_SCHEMA`, `DIM_DATE_SCHEMA`, `DIM_ACTOR_SCHEMA`, `FACT_COMMITS_SCHEMA`, `FACT_ISSUES_SCHEMA`, `FACT_PULL_REQUESTS_SCHEMA`, `FACT_RELEASES_SCHEMA`, `FACT_REPO_SNAPSHOT_SCHEMA`, `FACT_REPO_DAILY_ACTIVITY_SCHEMA`) and audit views (`AUDIT_GOLD_RECONCILIATION_SCHEMA`, `AUDIT_PIPELINE_RUNS_SCHEMA`, `AUDIT_QUARANTINE_SUMMARY_SCHEMA`).
+- [x] **`src/common.py`** — Updated execution logging (`build_log_row`, `start_run`, `end_run`, `log_run`) to record `rows_aggregated` and support `layer='GOLD'`; added security length check and warning for salts shorter than 16 characters in `get_salt()`.
+
+### 3.2 Pure Transformation Functions
+- [x] **`src/gold_transforms.py`**:
+  * `REPO_DB_MAPPING` catalog mapping all 10 repositories across relational, document, graph/multi-model, distributed, and vector categories.
+  * `build_dim_repo`: SCD Type 1 mapping with `db_type` and `db_category`.
+  * `build_dim_date`: Continuous calendar spine generation (2020 to 2027) with calendar attributes and `in_analysis_window` flags.
+  * `build_dim_actor`: Unified contributor identity (`login` or salted `author_email_hash`) with explicit `Unknown` member row.
+  * Base Facts: `build_fact_commits`, `build_fact_issues` (`hours_to_close`), `build_fact_pull_requests` (`hours_to_merge`), `build_fact_releases` (`days_since_previous_release`), `build_fact_repo_snapshot`.
+  * Aggregate Fact: `build_fact_repo_daily_activity` with dense calendar spine cross-join, zero-filling, and rolling 28-day & 84-day human commit velocity window functions.
+
+### 3.3 Gold DDL & Pipeline Notebooks
+- [x] **`notebooks/01_setup.py`** — Enhanced with `gold_schema` widget, idempotent `ALTER TABLE ops.pipeline_execution_logs ADD COLUMNS (rows_aggregated BIGINT)`, explicit DDL for all 9 Gold tables with Liquid Clustering (`CLUSTER BY`), informational Unity Catalog PK/FK constraints, and audit views (`audit_pipeline_runs`, `audit_quarantine_summary`, `audit_gold_reconciliation`).
+- [x] **`notebooks/05_silver_to_gold.py`** — Complete Gold pipeline notebook: incremental watermarking, Delta `MERGE INTO`, formatted explain plan inspection, 3 Quality Gates (PK uniqueness, referential integrity / orphan FKs, row count parity vs Silver), Liquid Clustering `OPTIMIZE`, and execution logging.
+- [x] **`notebooks/04_run_pipeline.py`** — Orchestrator integration: added `nb_05_path`, wired Gold pass into Section A, B, C, and D. Extended Section D to assert full pipeline idempotency on both row counts and analytical measure sums (`sum_commits_total`).
+
+### 3.4 Unit Tests
+- [x] **`tests/test_gold_logic.py`** — 10 comprehensive PySpark tests (62/62 total passing):
+  * Test surrogate key determinism (`compute_repo_key`, `compute_actor_key`, `compute_date_key`).
+  * Test 10-repo mapping and classifications in `dim_repo`.
+  * Test `dim_date` sequence, weekend flags, and analysis window filters.
+  * Test `dim_actor` login vs email hash fallback and unknown member row.
+  * Test `fact_issues` duration and PR exclusion.
+  * Test `fact_pull_requests` merge hours calculation.
+  * Test `fact_releases` lag calculation.
+  * Test `fact_repo_daily_activity` dense calendar spine zero-filling and rolling 28-day & 84-day velocity window sums.
+  * Test full reconciliation and parity against Silver.
+
+### 3.5 Documentation & BI Handoff
+- [x] **`docs/gold_data_dictionary.md`** — Complete physical and semantic data dictionary with Mermaid `erDiagram`.
+- [x] **`docs/gold_design_decisions.md`** — Design rationale: surrogate keys, SCD 1, Liquid Clustering vs Hive partitioning, dense spine.
+- [x] **`docs/decision_log_source_notes.md`** — Traceable source notes linking decisions to codebase implementations.
+- [x] **`docs/spark_dag_guide.md`** — Step-by-step guide for capturing and reading the Spark DAG for `fact_repo_daily_activity`.
+- [x] **`docs/finops_queries.md`** — Production FinOps SQL queries and Serverless DBU cost extrapolation models.
+- [x] **`docs/powerbi_handoff.md`** — Developer contract and modeling guide for Power BI dashboard developer.
+- [x] **`docs/proof/README.md`** & **`docs/screenshots/CHECKLIST.md`** — Updated with Phase 3 rubric requirements and screenshot specifications (items 21–26).
+
+---
+
+## What Still Needs to Happen Before Submission
+
+### Live Databricks Execution (Run on Cluster)
+- [ ] Run `01_setup.py` on Databricks Serverless to verify Gold schemas, tables, constraints, and audit views.
+- [ ] Run `04_run_pipeline.py` Section A to execute full Bronze → Silver → Gold pipeline.
+- [ ] Run `04_run_pipeline.py` Section D to execute and capture live idempotency proof across all layers.
+- [ ] Capture 6 Phase 3 screenshots specified in `docs/screenshots/CHECKLIST.md` (items 21–26).
+- [ ] Export executed HTML/IPYNB notebooks to `docs/proof/`.
 
 ---
 
