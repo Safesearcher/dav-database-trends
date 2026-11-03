@@ -3,8 +3,8 @@
 # University Data Analysis & Visualization — 2026
 
 **Last updated:** 2026-10-23  
-**Current branch:** `phase3-gold`  
-**Test suite:** 62/62 tests passing ✅ (10 comprehensive Gold logic unit tests, verified locally with uv)
+**Current branch:** `feat/fact-repo-stars-weekly`  
+**Test suite:** 71/71 tests passing ✅ (comprehensive Gold logic & schema unit tests, verified locally with uv)
 
 ---
 
@@ -23,6 +23,8 @@
 
 ## ⏳ Phase 3 — Gold Layer (Local Complete, Databricks Verification Pending)
 
+**Star History Feature:** Historical star tracking with `fact_repo_stars_weekly` table has been implemented with Sunday-based weekly grain, dense spine, dynamic `is_partial_week`, and rolling 4-week velocity metric using GitHub `/stargazers/history`. See the new stargazers entity in Bronze/Silver layers and the weekly star fact in Gold.
+
 ### 3.1 Schemas & Core Data Models
 - [x] **`src/schemas.py`** — Added `rows_aggregated` to `PIPELINE_EXECUTION_LOGS_SCHEMA`; defined explicit `StructType` schemas for all 9 Gold tables (`DIM_REPO_SCHEMA`, `DIM_DATE_SCHEMA`, `DIM_ACTOR_SCHEMA`, `FACT_COMMITS_SCHEMA`, `FACT_ISSUES_SCHEMA`, `FACT_PULL_REQUESTS_SCHEMA`, `FACT_RELEASES_SCHEMA`, `FACT_REPO_SNAPSHOT_SCHEMA`, `FACT_REPO_DAILY_ACTIVITY_SCHEMA`) and audit views (`AUDIT_GOLD_RECONCILIATION_SCHEMA`, `AUDIT_PIPELINE_RUNS_SCHEMA`, `AUDIT_QUARANTINE_SUMMARY_SCHEMA`).
 - [x] **`src/common.py`** — Updated execution logging (`build_log_row`, `start_run`, `end_run`, `log_run`) to record `rows_aggregated` and support `layer='GOLD'`; added security length check and warning for salts shorter than 16 characters in `get_salt()`.
@@ -34,10 +36,10 @@
   * `build_dim_date`: Continuous calendar spine generation (2020 to 2027) with calendar attributes and `in_analysis_window` flags.
   * `build_dim_actor`: Unified contributor identity (`login` or salted `author_email_hash`) with explicit `Unknown` member row.
   * Base Facts: `build_fact_commits`, `build_fact_issues` (`hours_to_close`), `build_fact_pull_requests` (`hours_to_merge`), `build_fact_releases` (`days_since_previous_release`), `build_fact_repo_snapshot`.
-  * Aggregate Fact: `build_fact_repo_daily_activity` with dense calendar spine cross-join, zero-filling, and rolling 28-day & 84-day human commit velocity window functions.
+  * Aggregate Facts: `build_fact_repo_daily_activity` with dense calendar spine cross-join, zero-filling, and rolling 28-day & 84-day human commit velocity window functions; `build_fact_repo_stars_weekly` with dense ISO-week spine and 4-week star velocity.
 
 ### 3.3 Gold DDL & Pipeline Notebooks
-- [x] **`notebooks/01_setup.py`** — Enhanced with `gold_schema` widget, idempotent `ALTER TABLE ops.pipeline_execution_logs ADD COLUMNS (rows_aggregated BIGINT)`, explicit DDL for all 9 Gold tables with Liquid Clustering (`CLUSTER BY`), informational Unity Catalog PK/FK constraints, and audit views (`audit_pipeline_runs`, `audit_quarantine_summary`, `audit_gold_reconciliation`).
+- [x] **`notebooks/01_setup.py`** — Enhanced with `gold_schema` widget, idempotent `ALTER TABLE ops.pipeline_execution_logs ADD COLUMNS (rows_aggregated BIGINT)`, explicit DDL for all 10 Gold tables with Liquid Clustering (`CLUSTER BY`), informational Unity Catalog PK/FK constraints, and audit views (`audit_pipeline_runs`, `audit_quarantine_summary`, `audit_gold_reconciliation`).
 - [x] **`notebooks/05_silver_to_gold.py`** — Complete Gold pipeline notebook: incremental watermarking, Delta `MERGE INTO`, formatted explain plan inspection, 3 Quality Gates (PK uniqueness, referential integrity / orphan FKs, row count parity vs Silver), Liquid Clustering `OPTIMIZE`, and execution logging.
 - [x] **`notebooks/04_run_pipeline.py`** — Orchestrator integration: added `nb_05_path`, wired Gold pass into Section A, B, C, and D. Extended Section D to assert full pipeline idempotency on both row counts and analytical measure sums (`sum_commits_total`).
 
@@ -51,10 +53,11 @@
   * Test `fact_pull_requests` merge hours calculation.
   * Test `fact_releases` lag calculation.
   * Test `fact_repo_daily_activity` dense calendar spine zero-filling and rolling 28-day & 84-day velocity window sums.
+  * Test `fact_repo_stars_weekly` dense ISO-week spine and 4-week star velocity window.
   * Test full reconciliation and parity against Silver.
 
 ### 3.5 Documentation & BI Handoff
-- [x] **`docs/gold_data_dictionary.md`** — Complete physical and semantic data dictionary with Mermaid `erDiagram`.
+- [x] **`docs/gold_data_dictionary.md`** — Complete physical and semantic data dictionary with Mermaid `erDiagram` including new `fact_repo_stars_weekly` table.
 - [x] **`docs/gold_design_decisions.md`** — Design rationale: surrogate keys, SCD 1, Liquid Clustering vs Hive partitioning, dense spine.
 - [x] **`docs/decision_log_source_notes.md`** — Traceable source notes linking decisions to codebase implementations.
 - [x] **`docs/spark_dag_guide.md`** — Step-by-step guide for capturing and reading the Spark DAG for `fact_repo_daily_activity`.
@@ -243,7 +246,7 @@ for BI queries and cross-repo trend analysis.
 - [ ] **Visualization 2:** PR merge rate comparison (bar chart, human contributors only)
 - [ ] **Visualization 3:** Issue resolution time distribution (boxplot per repo)
 - [ ] **Visualization 4:** Release cadence heatmap (6 repos with GitHub releases)
-- [ ] **Visualization 5:** Star growth vs commit activity scatter
+- [ ] **Visualization 5:** Star growth vs commit activity scatter (now uses weekly star data from fact_repo_stars_weekly)
 - [ ] **Visualization 6:** Bot vs human contributor ratio (stacked bar)
 - [ ] **Final report / notebook** with narrative, methodology, findings, limitations
 - [ ] **Take all 20 screenshots** in `docs/screenshots/CHECKLIST.md`

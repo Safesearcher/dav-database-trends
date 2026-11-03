@@ -1,10 +1,11 @@
 """
-Explicit PySpark StructType schemas for the 5 Medallion Bronze entities:
+Explicit PySpark StructType schemas for the Medallion Bronze entities:
 - repo_metadata
 - commits
 - issues
 - pulls
 - releases
+- stargazers
 
 Also includes schemas for Silver, Quarantine, and Ops Logging layers.
 All Bronze schemas include `_corrupt_record` (StringType) for Spark PERMISSIVE mode.
@@ -96,6 +97,9 @@ PRIMARY_KEYS = {
     "pulls": "id",
     "releases": "id",
     "repo_metadata": "id",
+    "stars_history": "week",
+    "stars_weekly": "week_start_date",
+    "stargazers": "week",
 }
 
 
@@ -352,12 +356,28 @@ BRONZE_METADATA_SCHEMA = StructType([
 ])
 """Schema for bronze repository metadata (PK: id). Captures community stars, forks, default branch, and licensing."""
 
+BRONZE_STARS_HISTORY_SCHEMA = StructType([
+    StructField("week", LongType(), True),
+    StructField("total", IntegerType(), True),
+    StructField("days", ArrayType(IntegerType()), True),
+    StructField("repo_full_name", StringType(), False),
+    StructField("load_timestamp", TimestampType(), False),
+    StructField("_source_file", StringType(), True),
+    StructField("batch_id", StringType(), True),
+    StructField("_corrupt_record", StringType(), True),
+])
+"""Schema for bronze stars_history (PK: week per repo). Pre-aggregated weekly star counts from GitHub /stargazers/history."""
+
+BRONZE_STARGAZERS_SCHEMA = BRONZE_STARS_HISTORY_SCHEMA
+
 BRONZE_SCHEMAS = {
     "repo_metadata": BRONZE_METADATA_SCHEMA,
     "commits": BRONZE_COMMITS_SCHEMA,
     "issues": BRONZE_ISSUES_SCHEMA,
     "pulls": BRONZE_PULLS_SCHEMA,
     "releases": BRONZE_RELEASES_SCHEMA,
+    "stars_history": BRONZE_STARS_HISTORY_SCHEMA,
+    "stargazers": BRONZE_STARS_HISTORY_SCHEMA,
 }
 
 
@@ -455,12 +475,27 @@ SILVER_REPO_METADATA_SCHEMA = StructType([
 ])
 """Silver repo metadata schema: keyed on (repo_id, repo_full_name) capturing community stats and license governance."""
 
+SILVER_STARS_WEEKLY_SCHEMA = StructType([
+    StructField("repo_full_name", StringType(), False),
+    StructField("week_start_date", DateType(), False),
+    StructField("week_timestamp_utc", TimestampType(), False),
+    StructField("stars_gained", IntegerType(), False),
+    StructField("days", ArrayType(IntegerType()), True),
+    StructField("_source_file", StringType(), True),
+    StructField("load_timestamp", TimestampType(), False),
+])
+"""Silver stars_weekly schema: one row per (repo_full_name, week_start_date) on Sunday-based week grain with zero PII."""
+
+SILVER_STARGAZERS_SCHEMA = SILVER_STARS_WEEKLY_SCHEMA
+
 SILVER_SCHEMAS = {
     "repo_metadata": SILVER_REPO_METADATA_SCHEMA,
     "commits": SILVER_COMMITS_SCHEMA,
     "issues": SILVER_ISSUES_SCHEMA,
     "pull_requests": SILVER_PULL_REQUESTS_SCHEMA,
     "releases": SILVER_RELEASES_SCHEMA,
+    "stars_weekly": SILVER_STARS_WEEKLY_SCHEMA,
+    "stargazers": SILVER_STARS_WEEKLY_SCHEMA,
 }
 
 
@@ -632,6 +667,18 @@ GOLD_FACT_REPO_DAILY_ACTIVITY_SCHEMA = StructType([
 ])
 """Gold fact_repo_daily_activity schema: Dense daily aggregate fact with rolling 4-week and 12-week velocity metrics."""
 
+GOLD_FACT_REPO_STARS_WEEKLY_SCHEMA = StructType([
+    StructField("repo_key", LongType(), False),
+    StructField("week_start_date_key", IntegerType(), False),
+    StructField("week_start_date", DateType(), False),
+    StructField("stars_gained", LongType(), False),
+    StructField("cumulative_stars", LongType(), False),
+    StructField("star_velocity_4wk", LongType(), True),
+    StructField("is_partial_week", BooleanType(), False),
+    StructField("load_timestamp", TimestampType(), False),
+])
+"""Gold fact_repo_stars_weekly schema: Sunday-based week grain with dense zero-filled spine, 4-week star velocity, and partial week flag."""
+
 GOLD_AUDIT_PIPELINE_RUNS_SCHEMA = StructType([
     StructField("log_id", StringType(), False),
     StructField("run_date", DateType(), True),
@@ -673,5 +720,6 @@ GOLD_SCHEMAS = {
     "fact_releases": GOLD_FACT_RELEASES_SCHEMA,
     "fact_repo_snapshot": GOLD_FACT_REPO_SNAPSHOT_SCHEMA,
     "fact_repo_daily_activity": GOLD_FACT_REPO_DAILY_ACTIVITY_SCHEMA,
+    "fact_repo_stars_weekly": GOLD_FACT_REPO_STARS_WEEKLY_SCHEMA,
 }
 

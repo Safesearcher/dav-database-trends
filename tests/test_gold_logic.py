@@ -39,6 +39,7 @@ from src.gold_transforms import (
     build_fact_releases,
     build_fact_repo_snapshot,
     build_fact_repo_daily_activity,
+    build_fact_repo_stars_weekly,
 )
 
 # Detect if PySpark is available
@@ -460,6 +461,74 @@ class TestGoldTransforms(unittest.TestCase):
         # Total reconciliation: sum of commits_total across all 35 days == 10 (5+3+2)
         total_commits_sum = sum(r["commits_total"] for r in daily_rows.values())
         self.assertEqual(total_commits_sum, 10)
+
+
+    @unittest.skipUnless(HAS_SPARK, "PySpark not available")
+    def test_fact_repo_stars_weekly_logic(self):
+        """Test verifies fact_repo_stars_weekly:
+        1. Sunday assertion: rejects non-Sunday rows.
+        2. Dynamic is_partial_week evaluation on a Tuesday:
+           - Current Sunday week (2026-11-01) is partial (current_date 2026-11-03 < 2026-11-08)
+           - Prior Sunday week (2026-10-25) is complete (current_date 2026-11-03 < 2026-11-01 is False)
+        3. star_velocity_4wk is NULL on partial weeks, and computed on complete weeks.
+        4. dim_date referential integrity drop guard fails loudly if dim_date missing.
+        """
+        from src.schemas import GOLD_DIM_REPO_SCHEMA, SILVER_STARS_WEEKLY_SCHEMA
+        now = datetime.now(timezone.utc)
+        test_key = 123456789
+
+        repo_data = [(test_key, 1, "redis/redis", "redis", "redis", "desc", "main", "BSD", now, "NoSQL", "Key-Value", now)]
+        df_dim_repo = spark.createDataFrame(repo_data, schema=GOLD_DIM_REPO_SCHEMA)
+
+        # Generate dim_date covering October and November 2026
+        df_dim_date = build_dim_date(spark, start_date_str="2026-10-01", end_date_str="2026-11-30")
+
+        # Create silver weekly data for 5 consecutive Sundays:
+        # 2026-10-04, 2026-10-11, 2026-10-18, 2026-10-25, 2026-11-01
+        sundays = [date(2026, 10, 4), date(2026, 10, 11), date(2026, 10, 18), date(2026, 10, 25), date(2026, 11, 1)]
+        silver_data = [
+            ("redis/redis", sun, datetime.combine(sun, datetime.min.time(), tzinfo=timezone.utc), 10, [1, 1, 2, 2, 1, 1, 2], "src.json", now)
+            for sun in sundays
+        ]
+        df_silver = spark.createDataFrame(silver_data, schema=SILVER_STARS_WEEKLY_SCHEMA)
+
+        # Evaluate with Tuesday 2026-11-03 as current_date
+        df_fact_stars = build_fact_repo_stars_weekly(
+            df_silver_stars_weekly=df_silver,
+            df_dim_repo=df_dim_repo,
+            df_dim_date=df_dim_date,
+            current_date_val="2026-11-03",
+        )
+
+        rows = {r["week_start_date"]: r for r in df_fact_stars.collect()}
+
+        # 1. Check complete week: 2026-10-25
+        row_oct25 = rows[date(2026, 10, 25)]
+        self.assertFalse(row_oct25["is_partial_week"])
+        self.assertEqual(row_oct25["stars_gained"], 10)
+        self.assertEqual(row_oct25["cumulative_stars"], 40)
+        self.assertEqual(row_oct25["star_velocity_4wk"], 40)
+
+        # 2. Check partial week on Tuesday 2026-11-03: 2026-11-01
+        row_nov01 = rows[date(2026, 11, 1)]
+        self.assertTrue(row_nov01["is_partial_week"])
+        self.assertEqual(row_nov01["stars_gained"], 10)
+        self.assertEqual(row_nov01["cumulative_stars"], 50)
+        # Velocity MUST be NULL on partial weeks
+        self.assertIsNone(row_nov01["star_velocity_4wk"])
+
+        # 3. Test Sunday Quality Gate failure: pass a Monday row
+        bad_silver_data = [
+            ("redis/redis", date(2026, 11, 2), now, 5, [1, 1, 1, 1, 1, 0, 0], "src.json", now)
+        ]
+        df_bad_silver = spark.createDataFrame(bad_silver_data, schema=SILVER_STARS_WEEKLY_SCHEMA)
+        with self.assertRaises(AssertionError) as ctx:
+            build_fact_repo_stars_weekly(
+                df_silver_stars_weekly=df_bad_silver,
+                df_dim_repo=df_dim_repo,
+                df_dim_date=df_dim_date,
+            )
+        self.assertIn("not a Sunday", str(ctx.exception))
 
 
 if __name__ == "__main__":

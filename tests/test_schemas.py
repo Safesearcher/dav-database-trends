@@ -18,7 +18,9 @@ from src.schemas import (
     BRONZE_PULLS_SCHEMA,
     BRONZE_RELEASES_SCHEMA,
     BRONZE_METADATA_SCHEMA,
+    BRONZE_STARS_HISTORY_SCHEMA,
     SILVER_COMMITS_SCHEMA,
+    SILVER_STARS_WEEKLY_SCHEMA,
     SILVER_ISSUES_SCHEMA,
     SILVER_PULL_REQUESTS_SCHEMA,
     SILVER_RELEASES_SCHEMA,
@@ -37,6 +39,7 @@ class TestMedallionSchemas(unittest.TestCase):
             BRONZE_PULLS_SCHEMA,
             BRONZE_RELEASES_SCHEMA,
             BRONZE_METADATA_SCHEMA,
+            BRONZE_STARS_HISTORY_SCHEMA,
         ]
         for s in schemas:
             self.assertIsInstance(s, StructType)
@@ -49,6 +52,7 @@ class TestMedallionSchemas(unittest.TestCase):
             SILVER_PULL_REQUESTS_SCHEMA,
             SILVER_RELEASES_SCHEMA,
             SILVER_REPO_METADATA_SCHEMA,
+            SILVER_STARS_WEEKLY_SCHEMA,
             SILVER_QUARANTINE_SCHEMA,
             PIPELINE_EXECUTION_LOGS_SCHEMA,
         ]
@@ -95,6 +99,7 @@ class TestMedallionSchemas(unittest.TestCase):
             GOLD_FACT_RELEASES_SCHEMA,
             GOLD_FACT_REPO_SNAPSHOT_SCHEMA,
             GOLD_FACT_REPO_DAILY_ACTIVITY_SCHEMA,
+            GOLD_FACT_REPO_STARS_WEEKLY_SCHEMA,
             GOLD_SCHEMAS,
         )
         gold_schemas = [
@@ -107,12 +112,24 @@ class TestMedallionSchemas(unittest.TestCase):
             GOLD_FACT_RELEASES_SCHEMA,
             GOLD_FACT_REPO_SNAPSHOT_SCHEMA,
             GOLD_FACT_REPO_DAILY_ACTIVITY_SCHEMA,
+            GOLD_FACT_REPO_STARS_WEEKLY_SCHEMA,
         ]
-        self.assertEqual(len(GOLD_SCHEMAS), 9)
+        self.assertEqual(len(GOLD_SCHEMAS), 10)
         for s in gold_schemas:
             field_names = [f.name for f in s.fields]
             self.assertIn("load_timestamp", field_names, f"Missing load_timestamp in schema: {s}")
             self.assertIsInstance(s["load_timestamp"].dataType, TimestampType)
+
+    def test_gold_fact_repo_stars_weekly_schema_attributes(self):
+        from src.schemas import GOLD_FACT_REPO_STARS_WEEKLY_SCHEMA
+        field_names = [f.name for f in GOLD_FACT_REPO_STARS_WEEKLY_SCHEMA.fields]
+        self.assertIn("repo_key", field_names)
+        self.assertIn("week_start_date_key", field_names)
+        self.assertIn("stars_gained", field_names)
+        self.assertIn("cumulative_stars", field_names)
+        self.assertIn("star_velocity_4wk", field_names)
+        self.assertIn("is_partial_week", field_names)
+        self.assertIsInstance(GOLD_FACT_REPO_STARS_WEEKLY_SCHEMA["is_partial_week"].dataType, BooleanType)
 
 
 if __name__ == "__main__":

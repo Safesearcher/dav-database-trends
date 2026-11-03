@@ -35,6 +35,14 @@
 
 ## 1. Project Overview
 
+### Gold Star History Feature (`fact_repo_stars_weekly`)
+* **Grain:** `(repo_key, week_start_date_key)` — Sunday-based weekly grain.
+* **Liquid Clustering:** `CLUSTER BY (repo_key, week_start_date_key)`.
+* **Zero PII:** Endpoint returns aggregated weekly counts with no user logins or user IDs.
+* **Partial Week Handling:** The incomplete ongoing week is flagged with `is_partial_week = TRUE` (`current_date() < date_add(week_start_date, 7)`). Rolling metric `star_velocity_4wk` is strictly set to `NULL` on partial weeks to prevent false dashboard downturns.
+* **Power BI Contract:** Visuals depicting weekly star trends **must** use `dim_date[full_date]` (the Sunday week start) as the continuous date axis, **never** `dim_date[week_of_year]`, since ISO weeks end on Sunday.
+
+
 This pipeline ingests raw JSON from the **GitHub REST API** for 10 database repositories
 (relational, document, key-value, distributed, vector) into a **Medallion architecture** on
 Databricks Serverless with Unity Catalog and Delta Lake.
@@ -43,8 +51,8 @@ Databricks Serverless with Unity Catalog and Delta Lake.
 |---|---|---|---|
 | **Source** | GitHub REST API | `scripts/fetch_incremental.py` / `notebooks/00_ingest_github_api.py` | Pull raw JSON |
 | **Bronze** | Unity Catalog Volume → Delta | `notebooks/02_raw_to_bronze.py` | Raw, schema-validated, idempotent |
-| **Silver** | Unity Catalog Delta tables | `notebooks/03_bronze_to_silver.py` | Typed, PII-masked, deduplicated |
-| **Gold** | Unity Catalog Delta tables | `notebooks/05_silver_to_gold.py` | Dimensional star schema (3 dims, 5 base facts, 1 aggregate fact with dense calendar spine) |
+| **Silver** | Unity Catalog Delta tables | `notebooks/03_bronze_to_silver.py` | Typed, PII-masked, deduplicated (6 entities including stars_weekly) |
+| **Gold** | Unity Catalog Delta tables | `notebooks/05_silver_to_gold.py` | Dimensional star schema (3 dims, 5 base facts, 2 aggregate facts with dense spines) |
 | **Ops** | Unity Catalog Delta | `notebooks/01_setup.py` | Audit logs, reconciliation, & quarantine |
 
 **Design principles:**
@@ -108,6 +116,7 @@ dav-database-trends/
 │   └── ingestion/               # GitHub REST API client & helpers
 │       └── github_client.py
 ├── scripts/
+│   ├── fetch_stars_history.py   # Standalone GitHub stargazers/history extractor (204 pages)
 │   ├── full_load.py             # Historical full ingest → bronze/
 │   ├── fetch_samples.py         # 5-record slice samples for testing
 │   ├── fetch_incremental.py     # Incremental GitHub fetch → samples/incremental/
@@ -464,6 +473,19 @@ Primary key: `(repo_id, repo_full_name)` · Source: `bronze.repo_metadata`
 | `updated_at_utc` | TIMESTAMP | ✓ | | Last metadata update |
 | `pushed_at_utc` | TIMESTAMP | ✓ | | Last push time |
 | `topics` | ARRAY\<STRING\> | ✓ | | Repository topic tags |
+| `_source_file` | STRING | ✓ | | Volume file path |
+| `load_timestamp` | TIMESTAMP | ✗ | | Silver ingest time (UTC) |
+
+### 6.6 `silver.stars_weekly`
+Primary key: `(repo_full_name, week_start_date)` · Source: `bronze.stars_history` / GitHub `GET /repos/{owner}/{repo}/stargazers/history`
+
+| Column | Type | Nullable | PK | Description |
+|---|---|---|---|---|
+| `repo_full_name` | STRING | ✗ | ✓ | `owner/repo` |
+| `week_start_date` | DATE | ✗ | ✓ | Sunday week start date (`date_add(DATE'1970-01-01', cast(week/86400 as int))`) |
+| `week_timestamp_utc` | TIMESTAMP | ✗ | | UTC timestamp of Sunday 00:00:00 |
+| `stars_gained` | LONG | ✗ | | Total stars gained during the 7-day Sunday-to-Saturday window |
+| `days` | ARRAY\<INT\> | ✓ | | 7 daily star counts for the week (Sunday through Saturday) |
 | `_source_file` | STRING | ✓ | | Volume file path |
 | `load_timestamp` | TIMESTAMP | ✗ | | Silver ingest time (UTC) |
 

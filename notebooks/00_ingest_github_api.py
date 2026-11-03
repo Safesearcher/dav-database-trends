@@ -17,7 +17,7 @@
 # ── Global Widgets ──────────────────────────────────────────────────────────
 dbutils.widgets.text("catalog", "workspace", "Unity Catalog Name")
 dbutils.widgets.text("repo", "ALL", "Repository (owner/repo or 'ALL')")
-dbutils.widgets.dropdown("entity", "ALL", ["ALL", "commits", "issues", "pulls", "releases", "repo_metadata"], "Entity Name")
+dbutils.widgets.dropdown("entity", "ALL", ["ALL", "commits", "issues", "pulls", "releases", "repo_metadata", "stars_history", "stargazers"], "Entity Name")
 dbutils.widgets.dropdown("run_mode", "full", ["full", "incremental", "backfill"], "Execution Run Mode")
 dbutils.widgets.text("since", "", "Since Timestamp (ISO-8601, empty = default)")
 dbutils.widgets.text("until", "", "Until Timestamp (ISO-8601, empty = unbounded)")
@@ -26,6 +26,7 @@ dbutils.widgets.text("out_root", "/Volumes/workspace/bronze_data/raw_api", "Full
 dbutils.widgets.text("landing_root", "/Volumes/workspace/bronze_data/incremental", "Incremental/Backfill Storage Root")
 dbutils.widgets.text("github_token", "", "GitHub API Token (optional fallback; secret scope preferred)")
 dbutils.widgets.dropdown("skip_existing", "false", ["false", "true"], "Skip already downloaded entities")
+dbutils.widgets.text("max_pages_per_repo", "", "Max pages per repo for stargazers (empty = all pages)")
 
 # COMMAND ----------
 import json
@@ -48,6 +49,7 @@ from src.ingestion.github_client import (
     resolve_repo,
     resolve_token,
     write_json_atomic,
+    fetch_stargazers_history,
 )
 
 # Parse parameters from widgets
@@ -76,13 +78,17 @@ until_iso = normalise_since(until_raw) if until_raw else None
 target_repos = resolve_repo(repo_widget)
 
 # Resolve target entities
-ALL_ENTITIES = ["repo_metadata", "commits", "issues", "pulls", "releases"]
+ALL_ENTITIES = ["repo_metadata", "commits", "issues", "pulls", "releases", "stars_history"]
 if entity_widget.upper() == "ALL":
     target_entities = list(ALL_ENTITIES)
 elif entity_widget in ALL_ENTITIES:
     target_entities = [entity_widget]
 else:
     raise ValueError(f"Unknown entity {entity_widget!r}. Supported: 'ALL' or {ALL_ENTITIES}")
+
+# Parse max_pages_per_repo for stargazers
+max_pages_str = dbutils.widgets.get("max_pages_per_repo").strip()
+max_pages_per_repo = int(max_pages_str) if max_pages_str else None
 
 # COMMAND ----------
 # MAGIC %md
@@ -221,27 +227,48 @@ for owner, repo in target_repos:
 
         with log_run(spark, layer="INGEST", parameter=param_desc, batch_id=batch_id, catalog=catalog) as run_ctx:
             try:
-                records, stats = fetch_entity(
-                    owner=owner,
-                    repo=repo,
-                    entity=entity,
-                    run_mode=run_mode,
-                    since_iso=since_iso,
-                    until_iso=until_iso,
-                    token=token,
-                )
+                if entity in ("stargazers", "stars_history"):
+                    # Weekly star history from GET /repos/{owner}/{repo}/stargazers/history
+                    records, stats, ingest_status = fetch_stargazers_history(
+                        owner=owner,
+                        repo=repo,
+                        token=token,
+                        run_mode=run_mode,
+                        dest_json_path=target_file,
+                        skip_existing=skip_existing,
+                        max_pages=max_pages_per_repo,
+                    )
+                    rec_count = len(records)
+                    run_ctx["rows_inserted"] = rec_count
+                    run_ctx["rows_updated"] = 0
+                    run_ctx["message"] = f"status={ingest_status},pages={stats['pages']},api_calls={stats['pages']},records={rec_count}"
+                    run_ctx["status"] = "SUCCESS" if ingest_status in ("SUCCESS", "SKIPPED_EXISTING") else "FAILURE"
+                    print(f"  ✓ [{entity}] {rec_count} weekly records ({stats['pages']} pages, status={ingest_status}) -> {target_file}")
+                else:
+                    # Standard entity ingestion
+                    records, stats = fetch_entity(
+                        owner=owner,
+                        repo=repo,
+                        entity=entity,
+                        run_mode=run_mode,
+                        since_iso=since_iso,
+                        until_iso=until_iso,
+                        token=token,
+                    )
 
-                write_json_atomic(target_file, records)
+                    write_json_atomic(target_file, records)
 
-                rec_count = 1 if entity == "repo_metadata" and isinstance(records, dict) else len(records)
+                    rec_count = 1 if entity == "repo_metadata" and isinstance(records, dict) else len(records)
+                    total_records_ingested += rec_count
+
+                    run_ctx["rows_inserted"] = rec_count
+                    run_ctx["rows_updated"] = 0
+                    run_ctx["message"] = f"pages={stats['pages']} api_calls={stats['api_calls']}"
+                    run_ctx["status"] = "SUCCESS"
+
+                    print(f"  ✓ [{entity}] {rec_count} records ({stats['pages']} pages, {stats['api_calls']} api calls) -> {target_file}")
+
                 total_records_ingested += rec_count
-
-                run_ctx["rows_inserted"] = rec_count
-                run_ctx["rows_updated"] = 0
-                run_ctx["message"] = f"pages={stats['pages']} api_calls={stats['api_calls']}"
-                run_ctx["status"] = "SUCCESS"
-
-                print(f"  ✓ [{entity}] {rec_count} records ({stats['pages']} pages, {stats['api_calls']} api calls) -> {target_file}")
                 batch_results.append({
                     "repo": repo_full,
                     "entity": entity,

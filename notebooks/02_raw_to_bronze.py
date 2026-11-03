@@ -20,7 +20,7 @@
 
 dbutils.widgets.text("catalog",   "workspace",                         "Unity Catalog Name")
 dbutils.widgets.text("repo",      "surrealdb/surrealdb",               "Repository (owner/repo) or 'ALL'")
-dbutils.widgets.dropdown("entity", "commits", ["commits", "issues", "pulls", "releases", "repo_metadata", "ALL"], "Entity Name")
+dbutils.widgets.dropdown("entity", "commits", ["commits", "issues", "pulls", "releases", "repo_metadata", "stars_history", "stargazers", "ALL"], "Entity Name")
 dbutils.widgets.text("base_path", "/Volumes/workspace/bronze_data/raw", "Volume Storage Base Path")  # must match 04_run_pipeline base_path widget
 dbutils.widgets.text("since",     "",                                   "Since Filter Timestamp (ISO-8601, empty = no lower bound)")
 dbutils.widgets.text("until",     "",                                   "Until Filter Timestamp (ISO-8601, empty = no upper bound)")
@@ -92,7 +92,7 @@ ALL_REPOS = [
     ("chroma-core", "chroma"),
 ]
 
-ALL_ENTITIES = ["repo_metadata", "commits", "issues", "pulls", "releases"]
+ALL_ENTITIES = ["repo_metadata", "commits", "issues", "pulls", "releases", "stars_history"]
 
 TABLE_NAME_MAP = {
     "commits": "commits",
@@ -100,6 +100,8 @@ TABLE_NAME_MAP = {
     "pulls": "pull_requests",
     "releases": "releases",
     "repo_metadata": "repo_metadata",
+    "stars_history": "stars_history",
+    "stargazers": "stars_history",
 }
 
 # COMMAND ----------
@@ -122,6 +124,18 @@ def process_entity(
     repo_full_name = repo_slug if "/" in repo_slug else repo_slug.replace("_", "/", 1)
     dir_slug = repo_full_name.replace("/", "_")
     file_path = f"{base_path.rstrip('/')}/{dir_slug}/{entity_name}.json"
+    if entity_name in ("stars_history", "stargazers"):
+        # Check alternate file name if primary does not exist
+        try:
+            dbutils.fs.ls(file_path)
+        except Exception:
+            alt_name = "stargazers" if entity_name == "stars_history" else "stars_history"
+            alt_path = f"{base_path.rstrip('/')}/{dir_slug}/{alt_name}.json"
+            try:
+                dbutils.fs.ls(alt_path)
+                file_path = alt_path
+            except Exception:
+                pass
     target_table_name = TABLE_NAME_MAP.get(entity_name, entity_name)
     target_table = f"{catalog}.bronze.{target_table_name}"
     pk_field = PRIMARY_KEYS.get(entity_name, "id")

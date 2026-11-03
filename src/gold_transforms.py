@@ -737,3 +737,154 @@ def build_fact_repo_daily_activity(
     )
 
     return result
+
+
+# =============================================================================
+# 6. Weekly Star Velocity Fact (Dense Sunday-Based Week Spine + Rolling 4-Week Window)
+# =============================================================================
+
+def build_fact_repo_stars_weekly(
+    df_silver_stars_weekly: DataFrame,
+    df_dim_repo: DataFrame,
+    df_dim_date: DataFrame,
+    current_date_val: Optional[Any] = None,
+) -> DataFrame:
+    """
+    Builds gold.fact_repo_stars_weekly.
+    Grain: repo_key x week_start_date_key (Sunday-based week grain, matching GitHub /stargazers/history).
+
+    Methodology:
+    1. Inner-join silver.stars_weekly to dim_repo on repo_full_name (derives surrogate repo_key).
+    2. Convert week to week_start_date without session-timezone dependence:
+       date_add(DATE'1970-01-01', cast(week/86400 as int)).
+    3. Quality Gate: Assert every week_start_date is a Sunday (dayofweek == 1).
+    4. Dense Sunday-based weekly spine per repo from first-star week through latest star week,
+       zero-filling missing weeks with stars_gained = 0.
+    5. Inner-join dim_date on week_start_date = full_date for week_start_date_key.
+       Asserts count_before == count_after to prevent dropped rows.
+    6. is_partial_week: dynamically recomputed for all rows:
+       current_date() < date_add(week_start_date, 7).
+    7. star_velocity_4wk: rolling 4-week sum of stars_gained over complete weeks (rowsBetween(-3, 0)).
+       Set to NULL on partial weeks to prevent false downturns on dashboard visuals.
+    8. cumulative_stars: running sum of stars_gained per repo since inception.
+    """
+    # Accept either df_silver_stars_weekly or legacy df_silver_stargazers argument
+    df_src = df_silver_stars_weekly
+
+    # Timezone-free date conversion if week_start_date is missing or needs derivation
+    if "week_start_date" not in df_src.columns and "week" in df_src.columns:
+        df_src = df_src.withColumn(
+            "week_start_date",
+            F.expr("date_add(DATE'1970-01-01', cast(week / 86400 as int))")
+        )
+    elif "starred_at_utc" in df_src.columns and "week_start_date" not in df_src.columns:
+        # Fallback for raw timestamps: Sunday week start
+        df_src = df_src.withColumn(
+            "week_start_date",
+            F.expr("date_sub(to_date(starred_at_utc), dayofweek(to_date(starred_at_utc)) - 1)")
+        )
+
+    # Standardize column naming: stars_gained
+    if "stars_gained" not in df_src.columns:
+        if "total" in df_src.columns:
+            df_src = df_src.withColumn("stars_gained", F.col("total").cast(LongType()))
+        else:
+            df_src = df_src.withColumn("stars_gained", F.lit(1).cast(LongType()))
+
+    # Quality Gate: Assert all week_start_date rows are Sundays (Spark dayofweek: 1 = Sunday)
+    non_sundays = df_src.filter(F.dayofweek("week_start_date") != 1).count()
+    if non_sundays > 0:
+        raise AssertionError(
+            f"Quality Gate Failure in fact_repo_stars_weekly: {non_sundays} row(s) have a week_start_date "
+            f"that is not a Sunday! All GitHub stargazers/history weeks must begin on Sunday."
+        )
+
+    weekly = (
+        df_src
+        .filter(F.col("week_start_date").isNotNull())
+        .join(
+            df_dim_repo.select("repo_key", "repo_full_name"),
+            on="repo_full_name",
+            how="inner",
+        )
+        .groupBy("repo_key", "week_start_date")
+        .agg(F.sum("stars_gained").cast(LongType()).alias("stars_gained"))
+    )
+
+    bounds = weekly.groupBy("repo_key").agg(
+        F.min("week_start_date").alias("min_week"),
+        F.max("week_start_date").alias("max_week"),
+    )
+    spine = bounds.select(
+        "repo_key",
+        F.explode(
+            F.sequence(F.col("min_week"), F.col("max_week"), F.expr("interval 7 days"))
+        ).alias("week_start_date"),
+    )
+
+    dense = (
+        spine
+        .join(weekly, on=["repo_key", "week_start_date"], how="left")
+        .withColumn("stars_gained", F.coalesce(F.col("stars_gained"), F.lit(0)).cast(LongType()))
+    )
+
+    # Referential integrity check: Before/after count assertion on dim_date join
+    count_before = dense.count()
+    dense_joined = (
+        dense
+        .join(
+            df_dim_date.select(
+                F.col("date_key").alias("week_start_date_key"),
+                F.col("full_date").alias("week_start_date"),
+            ),
+            on="week_start_date",
+            how="inner",
+        )
+    )
+    count_after = dense_joined.count()
+    if count_before != count_after:
+        raise AssertionError(
+            f"Referential Integrity Failure in fact_repo_stars_weekly: {count_before - count_after} rows dropped "
+            f"joining dim_date! Check DIM_DATE_START lower bound (current: {DIM_DATE_START})."
+        )
+
+    # Dynamic is_partial_week: current_date() < date_add(week_start_date, 7)
+    if current_date_val is not None:
+        c_date_expr = F.to_date(F.lit(current_date_val))
+    else:
+        c_date_expr = F.to_date(F.current_timestamp())
+
+    dense_partial = dense_joined.withColumn(
+        "is_partial_week",
+        c_date_expr < F.expr("date_add(week_start_date, 7)")
+    )
+
+    w_cumulative = Window.partitionBy("repo_key").orderBy("week_start_date").rowsBetween(
+        Window.unboundedPreceding, 0
+    )
+    w_velocity = Window.partitionBy("repo_key").orderBy("week_start_date").rowsBetween(-3, 0)
+
+    return (
+        dense_partial
+        .withColumn("cumulative_stars", F.sum("stars_gained").over(w_cumulative).cast(LongType()))
+        .withColumn(
+            "star_velocity_4wk",
+            F.when(
+                F.col("is_partial_week"),
+                F.lit(None).cast(LongType())
+            ).otherwise(
+                F.sum("stars_gained").over(w_velocity).cast(LongType())
+            ),
+        )
+        .withColumn("load_timestamp", F.current_timestamp())
+        .select(
+            "repo_key",
+            "week_start_date_key",
+            "week_start_date",
+            "stars_gained",
+            "cumulative_stars",
+            "star_velocity_4wk",
+            "is_partial_week",
+            "load_timestamp",
+        )
+    )

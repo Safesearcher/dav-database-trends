@@ -34,6 +34,7 @@ import os
 import json
 from datetime import datetime, timezone
 from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 from pyspark.sql.types import (
     StringType,
     TimestampType,
@@ -300,6 +301,69 @@ def transform_metadata(bronze_df, repo_full_name):
 
     return valid_df, rejected_df, ["repo_id", "repo_full_name"]
 
+
+def transform_stars_weekly(bronze_df, repo_full_name):
+    """
+    Transforms raw bronze stars_history into typed silver.stars_weekly.
+    Converts epoch seconds week into week_start_date without session timezone shift:
+    date_add(DATE'1970-01-01', cast(week / 86400 as int)).
+    Casts week_timestamp_utc via to_timestamp(week_start_date).
+    Renames total to stars_gained and retains days array.
+    Zero PII - no user logins or IDs exist in this endpoint.
+    """
+    missing_pk = F.col("week").isNull()
+    corrupt_rec = F.col("_corrupt_record").isNotNull()
+    negative_total = F.col("total") < 0
+    rejected_cond = missing_pk | corrupt_rec | negative_total
+
+    rejection_reason = (
+        F.when(missing_pk, F.lit("Null week (primary key)"))
+        .when(corrupt_rec, F.lit("Corrupt JSON record"))
+        .otherwise(F.lit("Negative star total"))
+    )
+
+    week_start_expr = F.expr("date_add(DATE'1970-01-01', cast(week / 86400 as int))")
+
+    transformed = bronze_df.select(
+        F.lit(repo_full_name).alias("repo_full_name"),
+        F.col("week"),
+        F.col("total"),
+        F.col("days"),
+        F.col("_source_file"),
+        F.col("_corrupt_record"),
+        week_start_expr.alias("week_start_date"),
+        F.to_timestamp(week_start_expr).alias("week_timestamp_utc"),
+        F.coalesce(F.col("total"), F.lit(0)).cast(LongType()).alias("stars_gained"),
+        F.current_timestamp().alias("load_timestamp")
+    )
+
+    valid_df = (
+        transformed.filter(~rejected_cond)
+        .select(
+            "repo_full_name",
+            "week_start_date",
+            "week_timestamp_utc",
+            "stars_gained",
+            "days",
+            "_source_file",
+            "load_timestamp"
+        )
+        .dropDuplicates(["repo_full_name", "week_start_date"])
+    )
+
+    rejected_df = (
+        transformed.filter(rejected_cond)
+        .withColumn("rejection_reason", rejection_reason)
+        .select(
+            "repo_full_name",
+            "week_start_date",
+            "_source_file",
+            "rejection_reason",
+            "load_timestamp"
+        )
+    )
+
+    return valid_df, rejected_df, ["repo_full_name", "week_start_date"]
 # COMMAND ----------
 
 # MAGIC %md
@@ -328,6 +392,8 @@ def run_silver_entity(
         "pulls": f"{catalog}.silver.pull_requests",
         "releases": f"{catalog}.silver.releases",
         "repo_metadata": f"{catalog}.silver.repo_metadata",
+        "stars_history": f"{catalog}.silver.stars_weekly",
+        "stargazers": f"{catalog}.silver.stars_weekly",
     }
     bronze_table_map = {
         "commits": f"{catalog}.bronze.commits",
@@ -335,6 +401,8 @@ def run_silver_entity(
         "pulls": f"{catalog}.bronze.pull_requests",
         "releases": f"{catalog}.bronze.releases",
         "repo_metadata": f"{catalog}.bronze.repo_metadata",
+        "stars_history": f"{catalog}.bronze.stars_history",
+        "stargazers": f"{catalog}.bronze.stars_history",
     }
 
     target_table = target_table_map[entity]
@@ -384,6 +452,9 @@ def run_silver_entity(
             valid_df, rejected_df, pk_keys = transform_releases(bronze_raw, repo_full_name)
         elif entity == "repo_metadata":
             valid_df, rejected_df, pk_keys = transform_metadata(bronze_raw, repo_full_name)
+        elif entity in ("stars_history", "stargazers"):
+            valid_df, rejected_df, pk_keys = transform_stars_weekly(bronze_raw, repo_full_name)
+            excluded_prs = 0
 
         # Route invalid / malformed records to ops.silver_quarantine
         quarantined_count = 0
@@ -459,7 +530,7 @@ if target_repo.upper() == "ALL":
 else:
     repos_to_process = [target_repo.replace("_", "/", 1) if "_" in target_repo and "/" not in target_repo else target_repo]
 
-ENTITIES = ["commits", "issues", "pulls", "releases", "repo_metadata"]
+ENTITIES = ["commits", "issues", "pulls", "releases", "repo_metadata", "stars_history"]
 
 reconciliation_records = []
 

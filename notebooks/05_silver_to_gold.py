@@ -85,6 +85,7 @@ from src.gold_transforms import (
     build_fact_releases,
     build_fact_repo_snapshot,
     build_fact_repo_daily_activity,
+    build_fact_repo_stars_weekly,
 )
 
 # Parse parameters
@@ -145,6 +146,7 @@ df_silver_commits = spark.table(f"{catalog}.{silver_schema}.commits")
 df_silver_issues = spark.table(f"{catalog}.{silver_schema}.issues")
 df_silver_pull_requests = spark.table(f"{catalog}.{silver_schema}.pull_requests")
 df_silver_releases = spark.table(f"{catalog}.{silver_schema}.releases")
+df_silver_stars_weekly = spark.table(f"{catalog}.{silver_schema}.stars_weekly")
 
 if last_success_time and gold_mode == "incremental":
     df_src_commits = df_silver_commits.filter(F.col("load_timestamp") >= F.lit(last_success_time))
@@ -152,12 +154,14 @@ if last_success_time and gold_mode == "incremental":
     df_src_pulls = df_silver_pull_requests.filter(F.col("load_timestamp") >= F.lit(last_success_time))
     df_src_releases = df_silver_releases.filter(F.col("load_timestamp") >= F.lit(last_success_time))
     df_src_repo_meta = df_silver_repo_meta.filter(F.col("load_timestamp") >= F.lit(last_success_time))
+    df_src_stars_weekly = df_silver_stars_weekly.filter(F.col("load_timestamp") >= F.lit(last_success_time))
 else:
     df_src_commits = df_silver_commits
     df_src_issues = df_silver_issues
     df_src_pulls = df_silver_pull_requests
     df_src_releases = df_silver_releases
     df_src_repo_meta = df_silver_repo_meta
+    df_src_stars_weekly = df_silver_stars_weekly
 
 print("Silver source DataFrames prepared.")
 
@@ -347,7 +351,185 @@ with log_run(spark, layer="GOLD", parameter="table=fact_repo_daily_activity,repo
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Step 5: Quality Gates Verification
+# MAGIC ### Step 5: Build and Merge Weekly Star Velocity Fact (fact_repo_stars_weekly)
+# MAGIC Computes weekly star aggregates with dense Sunday-based week spine and 4-week rolling velocity.
+
+# COMMAND ----------
+
+with log_run(spark, layer="GOLD", parameter="table=fact_repo_stars_weekly,repo=ALL,entity=stars_history", batch_id=batch_id, catalog=catalog) as run_ctx_stars:
+    silver_table_name = f"{catalog}.{silver_schema}.stars_weekly"
+    if not spark.catalog.tableExists(silver_table_name):
+        run_ctx_stars["status"] = "FAILURE"
+        run_ctx_stars["message"] = f"Source table {silver_table_name} does not exist."
+        raise RuntimeError(f"Required source table {silver_table_name} does not exist.")
+
+    df_silver_stars = spark.table(silver_table_name)
+    if df_silver_stars.limit(1).count() == 0:
+        run_ctx_stars["status"] = "FAILURE"
+        run_ctx_stars["message"] = f"Source table {silver_table_name} is empty (0 rows)."
+        raise RuntimeError(f"Required source table {silver_table_name} is empty (0 rows).")
+
+    t_gold_repo = spark.table(f"{catalog}.{gold_schema}.dim_repo")
+    t_gold_date = spark.table(f"{catalog}.{gold_schema}.dim_date")
+
+    df_fact_stars_weekly = build_fact_repo_stars_weekly(
+        df_silver_stars_weekly=df_silver_stars,
+        df_dim_repo=t_gold_repo,
+        df_dim_date=t_gold_date,
+    )
+
+    print("
+" + "=" * 80)
+    print("EXPLAIN FORMATTED: gold.fact_repo_stars_weekly")
+    print("=" * 80)
+    df_fact_stars_weekly.explain(mode="formatted")
+    print("=" * 80 + "
+")
+
+    ins_stars, upd_stars = merge_delta(
+        spark,
+        df_fact_stars_weekly,
+        f"{catalog}.{gold_schema}.fact_repo_stars_weekly",
+        ["repo_key", "week_start_date_key"],
+        update_all=True
+    )
+    run_ctx_stars["rows_inserted"] = ins_stars
+    run_ctx_stars["rows_updated"] = upd_stars
+    run_ctx_stars["rows_aggregated"] = ins_stars + upd_stars
+    print(f"  ✓ fact_repo_stars_weekly merged: {ins_stars} inserted, {upd_stars} updated ({ins_stars + upd_stars} aggregated)")
+# MAGIC %md
+# MAGIC ### Step 6: Reconciliation Check - cumulative_stars vs fact_repo_snapshot.stargazers_count
+# MAGIC Reconciles weekly star history against snapshot stargazers count at the exact snapshot date.
+# MAGIC Reads snapshot_date_key dynamically from fact_repo_snapshot, sums days array through the snapshot weekday,
+# MAGIC and logs measured deltas per repo to gold.audit_gold_reconciliation.
+
+# COMMAND ----------
+
+print("
+" + "=" * 80)
+print("EXECUTING STAR HISTORY RECONCILIATION AT SNAPSHOT DATE")
+print("=" * 80)
+
+# 1. Read latest snapshot per repo dynamically from fact_repo_snapshot
+df_snapshots = (
+    spark.table(f"{catalog}.{gold_schema}.fact_repo_snapshot")
+    .join(
+        spark.table(f"{catalog}.{gold_schema}.fact_repo_snapshot")
+        .groupBy("repo_key")
+        .agg(F.max("snapshot_date_key").alias("snapshot_date_key")),
+        on=["repo_key", "snapshot_date_key"],
+        how="inner"
+    )
+    .select("repo_key", "snapshot_date_key", "stargazers_count")
+)
+
+# 2. Derive snapshot date and Sunday week start
+df_snapshots_dated = (
+    df_snapshots
+    .withColumn("snap_date", F.to_date(F.col("snapshot_date_key").cast("string"), "yyyyMMdd"))
+    .withColumn("snap_week_start", F.expr("date_sub(snap_date, dayofweek(snap_date) - 1)"))
+    .withColumn("snap_weekday_idx", F.dayofweek("snap_date") - 1)  # 0=Sunday, 6=Saturday
+)
+
+# 3. Join with silver.stars_weekly for the days array of the snapshot week
+# and get repo_full_name mapping via dim_repo
+df_dim_r = spark.table(f"{catalog}.{gold_schema}.dim_repo").select("repo_key", "repo_full_name")
+df_silver_w = spark.table(f"{catalog}.{silver_schema}.stars_weekly")
+
+df_snap_week_data = (
+    df_snapshots_dated
+    .join(df_dim_r, on="repo_key", how="inner")
+    .join(
+        df_silver_w.select(
+            F.col("repo_full_name"),
+            F.col("week_start_date").alias("snap_week_start"),
+            F.col("days"),
+            F.col("stars_gained").alias("week_stars_gained"),
+        ),
+        on=["repo_full_name", "snap_week_start"],
+        how="left"
+    )
+)
+
+# 4. Get prior cumulative stars up to the week before the snapshot week
+df_facts = spark.table(f"{catalog}.{gold_schema}.fact_repo_stars_weekly")
+
+# Get cumulative_stars from the fact row matching snap_week_start
+df_fact_snap_week = (
+    df_facts
+    .join(
+        df_snapshots_dated.select("repo_key", "snap_week_start"),
+        (df_facts.repo_key == df_snapshots_dated.repo_key) &
+        (df_facts.week_start_date == df_snapshots_dated.snap_week_start),
+        how="inner"
+    )
+    .select(
+        df_facts.repo_key,
+        df_facts.cumulative_stars.alias("week_cumulative_stars"),
+        df_facts.stars_gained.alias("fact_week_stars_gained")
+    )
+)
+
+# 5. Calculate cumulative stars through the snapshot day:
+# prior_cumulative = week_cumulative_stars - fact_week_stars_gained
+# stars_through_snap_day = prior_cumulative + sum(days[0..snap_weekday_idx])
+def sum_days_through_weekday(days_arr, weekday_idx):
+    if not days_arr:
+        return 0
+    return sum(days_arr[:weekday_idx + 1])
+
+sum_days_udf = F.udf(sum_days_through_weekday, LongType())
+
+df_reconciled = (
+    df_snap_week_data
+    .join(df_fact_snap_week, on="repo_key", how="left")
+    .withColumn("days_partial_sum", sum_days_udf(F.col("days"), F.col("snap_weekday_idx")))
+    .withColumn(
+        "prior_cumulative",
+        F.coalesce(F.col("week_cumulative_stars") - F.col("fact_week_stars_gained"), F.lit(0))
+    )
+    .withColumn(
+        "reconciled_stars_at_snapshot",
+        F.col("prior_cumulative") + F.coalesce(F.col("days_partial_sum"), F.col("fact_week_stars_gained"), F.lit(0))
+    )
+    .withColumn("delta", F.abs(F.col("stargazers_count") - F.col("reconciled_stars_at_snapshot")))
+    .withColumn("status", F.lit("MEASURED"))
+)
+
+print("Measured Reconciliation Results (Snapshot vs Cumulative at Snapshot Date):")
+df_reconciled.select(
+    "repo_key", "snapshot_date_key", "stargazers_count",
+    "reconciled_stars_at_snapshot", "delta", "status"
+).show(truncate=False)
+
+# Log reconciliation rows to gold.audit_gold_reconciliation
+recon_rows = []
+for row in df_reconciled.collect():
+    recon_rows.append((
+        "fact_repo_stars_weekly",
+        int(row["reconciled_stars_at_snapshot"]),
+        int(row["stargazers_count"]),
+        int(row["delta"]),
+        row["status"],
+        datetime.now(timezone.utc),
+    ))
+
+recon_schema = StructType([
+    StructField("table_name", StringType(), False),
+    StructField("weekly_cumulative", LongType(), True),
+    StructField("snapshot_count", LongType(), True),
+    StructField("delta", LongType(), True),
+    StructField("status", StringType(), False),
+    StructField("check_timestamp", TimestampType(), False),
+])
+df_star_recon = spark.createDataFrame(recon_rows, schema=recon_schema)
+df_star_recon.write.format("delta").mode("append").saveAsTable(f"{catalog}.{gold_schema}.audit_gold_reconciliation")
+print("Star history reconciliation logged to audit table.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Step 7: Quality Gates Verification
 # MAGIC 1. Primary Key Uniqueness
 # MAGIC 2. Referential Integrity (No Orphan Foreign Keys)
 # MAGIC 3. Row Count Parity Reconciliation vs. Silver
@@ -369,6 +551,7 @@ pk_definitions = {
     "fact_releases": ["repo_key", "release_id"],
     "fact_repo_snapshot": ["repo_key", "snapshot_date_key"],
     "fact_repo_daily_activity": ["repo_key", "date_key"],
+    "fact_repo_stars_weekly": ["repo_key", "week_start_date_key"],
 }
 
 for tbl, pks in pk_definitions.items():
@@ -423,6 +606,9 @@ check_orphans("fact_repo_snapshot", "snapshot_date_key", dim_date_keys, "date_ke
 check_orphans("fact_repo_daily_activity", "repo_key", dim_repo_keys, "repo_key", "dim_repo")
 check_orphans("fact_repo_daily_activity", "date_key", dim_date_keys, "date_key", "dim_date")
 
+check_orphans("fact_repo_stars_weekly", "repo_key", dim_repo_keys, "repo_key", "dim_repo")
+check_orphans("fact_repo_stars_weekly", "week_start_date_key", dim_date_keys, "date_key", "dim_date")
+
 # Gate 3: Row Count Parity Reconciliation vs. Silver
 reconciliation_pairs = [
     ("fact_commits", "commits"),
@@ -467,7 +653,7 @@ print("All Quality Gates PASSED successfully.")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Step 6: Liquid Clustering OPTIMIZE & Storage Inspection
+# MAGIC ### Step 8: Liquid Clustering OPTIMIZE & Storage Inspection
 
 # COMMAND ----------
 
@@ -492,7 +678,7 @@ if run_optimize:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Step 7: Completion & Exit
+# MAGIC ### Step 9: Completion & Exit
 
 # COMMAND ----------
 

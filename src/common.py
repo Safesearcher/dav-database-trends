@@ -71,6 +71,7 @@ DATE_COLUMN_MAP = {
     "pulls": "updated_at",
     "releases": "published_at",
     "repo_metadata": "updated_at",
+    "stargazers": "starred_at",
 }
 
 EMAIL_REGEX = r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"

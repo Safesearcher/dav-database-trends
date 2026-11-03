@@ -75,7 +75,7 @@ ALL_REPOS = [
     "milvus-io/milvus",
     "chroma-core/chroma",
 ]
-ALL_ENTITIES = ["repo_metadata", "commits", "issues", "pulls", "releases"]
+ALL_ENTITIES = ["repo_metadata", "commits", "issues", "pulls", "releases", "stars_history"]
 
 print(f"Orchestrator ready")
 print(f"  catalog   : {CATALOG}")
@@ -113,7 +113,7 @@ def show_counts(label=""):
         (f"{CATALOG}.gold",   [
             "dim_repo", "dim_date", "dim_actor",
             "fact_commits", "fact_issues", "fact_pull_requests",
-            "fact_releases", "fact_repo_snapshot", "fact_repo_daily_activity",
+            "fact_releases", "fact_repo_snapshot", "fact_repo_daily_activity", "fact_repo_stars_weekly",
             "audit_gold_reconciliation"
         ]),
         (f"{CATALOG}.ops",    ["silver_quarantine", "pipeline_execution_logs"]),
@@ -534,7 +534,7 @@ def _pipeline_state():
         (f"{CATALOG}.gold",   [
             "dim_repo", "dim_date", "dim_actor",
             "fact_commits", "fact_issues", "fact_pull_requests",
-            "fact_releases", "fact_repo_snapshot", "fact_repo_daily_activity"
+            "fact_releases", "fact_repo_snapshot", "fact_repo_daily_activity", "fact_repo_stars_weekly"
         ]),
         (f"{CATALOG}.ops",    ["silver_quarantine"]),
     ]

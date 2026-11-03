@@ -88,11 +88,15 @@ with log_run(spark, layer="SETUP", parameter=f"catalog={catalog}", batch_id=batc
             f"{silver_schema}.pull_requests",
             f"{silver_schema}.releases",
             f"{silver_schema}.repo_metadata",
+            f"{silver_schema}.stars_weekly",
+            f"{silver_schema}.stargazers",
             f"{bronze_schema}.commits",
             f"{bronze_schema}.issues",
             f"{bronze_schema}.pull_requests",
             f"{bronze_schema}.releases",
             f"{bronze_schema}.repo_metadata",
+            f"{bronze_schema}.stars_history",
+            f"{bronze_schema}.stargazers",
             f"{gold_schema}.dim_repo",
             f"{gold_schema}.dim_date",
             f"{gold_schema}.dim_actor",
@@ -102,6 +106,7 @@ with log_run(spark, layer="SETUP", parameter=f"catalog={catalog}", batch_id=batc
             f"{gold_schema}.fact_releases",
             f"{gold_schema}.fact_repo_snapshot",
             f"{gold_schema}.fact_repo_daily_activity",
+            f"{gold_schema}.fact_repo_stars_weekly",
             f"{gold_schema}.audit_gold_reconciliation",
         ]:
             spark.sql(f"DROP TABLE IF EXISTS {catalog}.{tbl}")
@@ -247,7 +252,32 @@ with log_run(spark, layer="SETUP", parameter=f"catalog={catalog}", batch_id=batc
             load_timestamp TIMESTAMP NOT NULL
         ) USING DELTA;
     """)
-    print(f"Verified all 5 Silver tables in {catalog}.{silver_schema}")
+
+    spark.sql(f"""
+        CREATE TABLE IF NOT EXISTS {catalog}.{silver_schema}.stars_weekly (
+            repo_full_name STRING NOT NULL,
+            week_start_date DATE NOT NULL,
+            week_timestamp_utc TIMESTAMP,
+            stars_gained INT NOT NULL,
+            days ARRAY<INT>,
+            _source_file STRING,
+            load_timestamp TIMESTAMP NOT NULL
+        ) USING DELTA;
+    """)
+
+    spark.sql(f"""
+        CREATE TABLE IF NOT EXISTS {catalog}.{bronze_schema}.stars_history (
+            week BIGINT,
+            total INT,
+            days ARRAY<INT>,
+            repo_full_name STRING NOT NULL,
+            load_timestamp TIMESTAMP NOT NULL,
+            _source_file STRING,
+            batch_id STRING,
+            _corrupt_record STRING
+        ) USING DELTA;
+    """)
+    print(f"Verified all Silver tables (including stars_weekly) in {catalog}.{silver_schema}")
 
     # 7. Explicit Creation of Bronze Tables from BRONZE_SCHEMAS
     TABLE_NAME_MAP = {
@@ -256,6 +286,7 @@ with log_run(spark, layer="SETUP", parameter=f"catalog={catalog}", batch_id=batc
         "pulls": "pull_requests",
         "releases": "releases",
         "repo_metadata": "repo_metadata",
+        "stargazers": "stargazers",
     }
     LINEAGE = [
         StructField("repo_full_name", StringType(), True),
@@ -267,7 +298,7 @@ with log_run(spark, layer="SETUP", parameter=f"catalog={catalog}", batch_id=batc
         fields = [f for f in schema.fields if f.name != "_corrupt_record"] + LINEAGE
         (spark.createDataFrame([], StructType(fields)).write.format("delta").mode("ignore")
              .saveAsTable(f"{catalog}.{bronze_schema}.{TABLE_NAME_MAP[entity]}"))
-    print(f"Verified all 5 Bronze tables in {catalog}.{bronze_schema}")
+    print(f"Verified all 6 Bronze tables in {catalog}.{bronze_schema}")
 
     # 8. Explicit DDL for Gold Layer Star Schema Tables (Liquid Clustering + Comments)
     # Dimensions
@@ -429,7 +460,29 @@ with log_run(spark, layer="SETUP", parameter=f"catalog={catalog}", batch_id=batc
         CLUSTER BY (repo_key, date_key)
         COMMENT 'Daily aggregate fact with dense calendar spine per repo and rolling 4-week / 12-week velocity metrics';
     """)
-    print(f"Verified all 9 Gold tables in {catalog}.{gold_schema}")
+
+    # Migration for existing fact_repo_stars_weekly: ensure is_partial_week column exists
+    try:
+        spark.sql(f"ALTER TABLE {catalog}.{gold_schema}.fact_repo_stars_weekly ADD COLUMNS (is_partial_week BOOLEAN)")
+        print(f"  [Migration] Added is_partial_week column to {catalog}.{gold_schema}.fact_repo_stars_weekly")
+    except Exception:
+        pass  # Column already exists or table will be created below
+
+    spark.sql(f"""
+        CREATE TABLE IF NOT EXISTS {catalog}.{gold_schema}.fact_repo_stars_weekly (
+            repo_key BIGINT NOT NULL COMMENT 'FK to dim_repo.repo_key',
+            week_start_date_key INT NOT NULL COMMENT 'FK to dim_date.date_key (Sunday week start)',
+            week_start_date DATE NOT NULL COMMENT 'Sunday week start date',
+            stars_gained BIGINT NOT NULL COMMENT 'New stars gained in this 7-day week',
+            cumulative_stars BIGINT NOT NULL COMMENT 'Running total of stars from first star week',
+            star_velocity_4wk BIGINT COMMENT 'Rolling 4-week sum of stars_gained (NULL for partial weeks)',
+            is_partial_week BOOLEAN NOT NULL COMMENT 'True if week contains current date and is incomplete',
+            load_timestamp TIMESTAMP NOT NULL COMMENT 'Medallion ETL load timestamp'
+        ) USING DELTA
+        CLUSTER BY (repo_key, week_start_date_key)
+        COMMENT 'Weekly star history fact with dense Sunday-based week spine, 4-week velocity, and partial week flag';
+    """)
+    print(f"Verified all 10 Gold tables in {catalog}.{gold_schema}")
 
     # 9. Informational Unity Catalog Primary Key & Foreign Key Constraints
     constraints = [

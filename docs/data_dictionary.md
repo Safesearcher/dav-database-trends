@@ -89,7 +89,23 @@ Tracks code review efficiency, contribution throughput, and branch merge lifecyc
 
 ---
 
-### 2.4 `silver.releases`
+### 2.4 `silver.stars_weekly`
+Historical weekly star aggregates per repository derived from GitHub's `GET /repos/{owner}/{repo}/stargazers/history` endpoint.
+> **PII Policy:** Zero PII — endpoint returns aggregated weekly counts with no user logins or user IDs.
+
+| Column | Type | Nullable | Primary Key | Description & Transformation |
+| :--- | :--- | :---: | :---: | :--- |
+| `repo_full_name` | `STRING` | No | PK (Composite) | GitHub repository identifier (`owner/repo`). |
+| `week_start_date` | `DATE` | No | PK (Composite) | Sunday week start date (`date_add(DATE'1970-01-01', cast(week/86400 as int))`). |
+| `week_timestamp_utc` | `TIMESTAMP` | No | No | UTC timestamp of Sunday 00:00:00. |
+| `stars_gained` | `BIGINT` | No | No | Total stars gained during the 7-day Sunday-to-Saturday window. |
+| `days` | `ARRAY<INT>` | Yes | No | 7 daily star counts for the week (Sunday through Saturday). |
+| `_source_file` | `STRING` | Yes | No | Lineage source Volume file path. |
+| `load_timestamp` | `TIMESTAMP` | No | No | UTC timestamp of Silver merge execution. |
+
+---
+
+### 2.5 `silver.releases`
 Tracks project release cadence, versioning tags, and release distribution assets.
 
 | Column | Type | Nullable | Primary Key | Description & Transformation |
@@ -107,7 +123,7 @@ Tracks project release cadence, versioning tags, and release distribution assets
 
 ---
 
-### 2.5 `silver.repo_metadata`
+### 2.6 `silver.repo_metadata`
 High-level repository health indicators, community adoption, and licensing governance.
 
 | Column | Type | Nullable | Primary Key | Description & Transformation |

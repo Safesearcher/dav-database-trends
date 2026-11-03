@@ -21,7 +21,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 
 class GitHubFetchError(Exception):
@@ -46,6 +46,9 @@ TRACKED_REPOS: List[Tuple[str, str]] = [
 PER_PAGE = 100
 DEFAULT_SINCE = "2026-04-01T00:00:00Z"
 LINK_RE = re.compile(r'<([^>]+)>;\s*rel="([^"]+)"')
+DEFAULT_ACCEPT = "application/vnd.github+json"
+STARGAZERS_ACCEPT = "application/vnd.github.star+json"
+STARGAZERS_CHECKPOINT_FILENAME = "stargazers.checkpoint.json"
 
 
 def _sanitize(text: str, token: Optional[str]) -> str:
@@ -113,20 +116,32 @@ def parse_next_link(link_header: Optional[str]) -> Optional[str]:
     return None
 
 
+def _set_query_param(url: str, key: str, value: str) -> str:
+    """Sets or replaces a single query parameter on a URL."""
+    parts = urllib.parse.urlsplit(url)
+    qs = urllib.parse.parse_qs(parts.query, keep_blank_values=True)
+    qs[key] = [str(value)]
+    new_query = urllib.parse.urlencode(qs, doseq=True)
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+
+
 def fetch_page(
     url: str,
     token: str,
     opener: Optional[Any] = None,
     timeout: float = 15.0,
+    accept: str = DEFAULT_ACCEPT,
 ) -> Tuple[Any, Dict[str, str]]:
     """
     Performs a single HTTP GET request to the GitHub API.
     Returns (json_data, headers_dict).
     Accepts an injectable `opener` for unit testing.
+    `accept` defaults to application/vnd.github+json; stargazers pass STARGAZERS_ACCEPT.
     """
     req = urllib.request.Request(url)
-    req.add_header("Accept", "application/vnd.github+json")
-    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("Accept", accept)
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
     req.add_header("User-Agent", "dav-database-trends")
     req.add_header("X-GitHub-Api-Version", "2022-11-28")
 
@@ -156,17 +171,27 @@ def paginate(
     token: str,
     opener: Optional[Any] = None,
     max_retries: int = 3,
+    accept: str = DEFAULT_ACCEPT,
+    max_pages: Optional[int] = None,
+    start_page: int = 1,
+    page_callback: Optional[Callable[[int, List[Any]], None]] = None,
 ) -> Tuple[List[Any], Dict[str, int]]:
     """
     Standard Link-header pagination with exponential backoff on transient errors
     and strict rate-limit handling.
-    Returns (all_records, stats) where stats = {"pages": n, "api_calls": n}.
+    Returns (all_records, stats) where stats = {"pages": n, "api_calls": n, "last_page": n}.
+    Optional `max_pages` limits pages fetched this call; `start_page` resumes GitHub page N
+    (the start page is re-fetched). `page_callback(page_number, page_records)` runs after
+    each successful page so callers can checkpoint.
     Raises GitHubFetchError on unrecoverable failure or retry exhaustion.
     """
     all_records: List[Any] = []
     current_url: Optional[str] = url
+    if start_page and start_page > 1:
+        current_url = _set_query_param(url, "page", str(start_page))
     page_count = 0
     api_call_count = 0
+    current_page = start_page if start_page and start_page > 0 else 1
 
     while current_url:
         page_data = None
@@ -176,7 +201,9 @@ def paginate(
         for attempt in range(max_retries + 1):
             api_call_count += 1
             try:
-                page_data, resp_headers = fetch_page(current_url, token, opener=opener)
+                page_data, resp_headers = fetch_page(
+                    current_url, token, opener=opener, accept=accept
+                )
                 fetched = True
                 break
             except urllib.error.HTTPError as exc:
@@ -246,20 +273,35 @@ def paginate(
             raise GitHubFetchError(clean_msg)
 
         page_count += 1
+        current_page = (start_page if start_page and start_page > 0 else 1) + page_count - 1
 
         if not isinstance(page_data, list):
             all_records.append(page_data)
+            if page_callback is not None:
+                page_callback(current_page, [page_data])
             break
 
         all_records.extend(page_data)
+        if page_callback is not None:
+            page_callback(current_page, page_data)
         _check_rate_limit(resp_headers, token)
 
         link_header = resp_headers.get("Link", "")
         current_url = parse_next_link(link_header)
         if not page_data:
+            current_url = None
+            break
+        if max_pages is not None and page_count >= max_pages:
             break
 
-    return all_records, {"pages": page_count, "api_calls": api_call_count}
+    last_page = (start_page if start_page and start_page > 0 else 1) + page_count - 1 if page_count else 0
+    has_more = bool(current_url) if isinstance(page_data, list) else False
+    return all_records, {
+        "pages": page_count,
+        "api_calls": api_call_count,
+        "last_page": last_page,
+        "has_more": int(has_more),
+    }
 
 
 def paginate_pulls(
@@ -416,6 +458,8 @@ def build_url(
             return f"{base}/pulls?state=all&sort=updated&direction=desc&per_page={PER_PAGE}"
     elif entity == "releases":
         return f"{base}/releases?per_page={PER_PAGE}"
+    elif entity in ("stargazers", "stars_history"):
+        return f"{base}/stargazers/history"
     else:
         raise ValueError(f"Unknown entity {entity!r}")
 
@@ -429,6 +473,9 @@ def fetch_entity(
     until_iso: Optional[str],
     token: str,
     opener: Optional[Any] = None,
+    max_pages: Optional[int] = None,
+    start_page: int = 1,
+    page_callback: Optional[Callable[[int, List[Any]], None]] = None,
 ) -> Tuple[Union[List[Any], Dict[str, Any]], Dict[str, int]]:
     """
     Fetches all records for an entity applying native and client-side filters.
@@ -543,6 +590,30 @@ def fetch_entity(
                 if not rec.get("updated_at") or rec.get("updated_at") <= until_iso
             ]
         return records, stats
+
+    elif entity in ("stargazers", "stars_history"):
+        url = build_url(owner, repo, entity)
+        pages_limit = 1 if run_mode == "incremental" else max_pages
+        records, stats = paginate(
+            url,
+            token,
+            opener=opener,
+            max_pages=pages_limit,
+            start_page=start_page,
+            page_callback=page_callback,
+        )
+        repo_full = f"{owner}/{repo}"
+        flattened = [
+            {
+                "week": rec.get("week"),
+                "total": rec.get("total", 0),
+                "days": rec.get("days", []),
+                "repo_full_name": repo_full,
+            }
+            for rec in records
+            if isinstance(rec, dict)
+        ]
+        return flattened, stats
 
     else:
         # commits (native since and until) or releases (no window)
@@ -662,3 +733,235 @@ def resolve_repo(repo_input: str) -> List[Tuple[str, str]]:
     raise ValueError(
         f"Unknown repository {repo_input!r}. Supported repositories: 'ALL' or one of {valid_repos}"
     )
+
+
+def flatten_stargazer_item(item: Any, repo_full_name: str) -> Dict[str, Any]:
+    """Flattens a GitHub star+json stargazer payload into a Bronze record."""
+    if not isinstance(item, dict):
+        return {
+            "repo_full_name": repo_full_name,
+            "user_id": None,
+            "user_login": None,
+            "starred_at": None,
+        }
+    user = item.get("user") if isinstance(item.get("user"), dict) else {}
+    return {
+        "repo_full_name": repo_full_name,
+        "user_id": user.get("id"),
+        "user_login": user.get("login"),
+        "starred_at": item.get("starred_at"),
+    }
+
+
+def estimate_stargazer_pages(stargazers_count: Optional[int], per_page: int = PER_PAGE) -> int:
+    """Ceiling division of stargazers_count / per_page (GitHub page size)."""
+    try:
+        count = int(stargazers_count or 0)
+    except (TypeError, ValueError):
+        count = 0
+    if count <= 0:
+        return 0
+    return (count + per_page - 1) // per_page
+
+
+def fetch_stargazers_count(
+    owner: str,
+    repo: str,
+    token: str,
+    opener: Optional[Any] = None,
+) -> int:
+    """GET /repos/{owner}/{repo} (default Accept) and return stargazers_count."""
+    url = f"https://api.github.com/repos/{owner}/{repo}"
+    data, _headers = fetch_page(url, token, opener=opener)
+    if not isinstance(data, dict):
+        return 0
+    try:
+        return int(data.get("stargazers_count") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def stargazers_checkpoint_path(entity_json_path: str) -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(entity_json_path)), STARGAZERS_CHECKPOINT_FILENAME)
+
+
+def read_stargazers_checkpoint(path: str) -> Dict[str, Any]:
+    if not os.path.exists(path):
+        return {"last_completed_page": 0, "status": "none", "records": 0}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {"last_completed_page": 0, "status": "none", "records": 0}
+    if not isinstance(data, dict):
+        return {"last_completed_page": 0, "status": "none", "records": 0}
+    return {
+        "last_completed_page": int(data.get("last_completed_page") or 0),
+        "status": str(data.get("status") or "none"),
+        "records": int(data.get("records") or 0),
+    }
+
+
+def write_stargazers_checkpoint(
+    path: str,
+    last_completed_page: int,
+    status: str,
+    records: int,
+) -> None:
+    write_json_atomic(
+        path,
+        {
+            "last_completed_page": int(last_completed_page),
+            "status": status,
+            "records": int(records),
+            "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+    )
+
+
+def merge_stargazer_records(existing: List[Any], incoming: List[Any]) -> List[Dict[str, Any]]:
+    """Dedupe on user_id keeping the earliest starred_at; null user_id rows are retained."""
+    by_id: Dict[Any, Dict[str, Any]] = {}
+    null_id_rows: List[Dict[str, Any]] = []
+    for rec in list(existing or []) + list(incoming or []):
+        if not isinstance(rec, dict):
+            continue
+        uid = rec.get("user_id")
+        if uid is None:
+            null_id_rows.append(rec)
+            continue
+        prev = by_id.get(uid)
+        incoming_ts = rec.get("starred_at") or "9999-12-31T23:59:59Z"
+        if prev is None:
+            by_id[uid] = rec
+            continue
+        prev_ts = prev.get("starred_at") or "9999-12-31T23:59:59Z"
+        if incoming_ts < prev_ts:
+            by_id[uid] = rec
+    return list(by_id.values()) + null_id_rows
+
+
+def load_landed_stargazers(path: str) -> List[Dict[str, Any]]:
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    if isinstance(data, list):
+        return [r for r in data if isinstance(r, dict)]
+    return []
+
+
+def resolve_stargazers_start_page(checkpoint: Dict[str, Any], run_mode: str, skip_existing: bool) -> Optional[int]:
+    """
+    Returns the GitHub page to fetch first, or None if the repo should be skipped.
+    Interrupted and incremental runs re-fetch last_completed_page (Silver dedupes overlap).
+    """
+    last_page = int(checkpoint.get("last_completed_page") or 0)
+    status = str(checkpoint.get("status") or "none")
+    if status == "complete" and skip_existing:
+        return None
+    if last_page > 0 and status == "complete" and run_mode == "full" and not skip_existing:
+        return 1
+    if last_page > 0:
+        return last_page
+    return 1
+
+
+def ingest_stargazers(
+    owner: str,
+    repo: str,
+    token: str,
+    dest_json_path: str,
+    run_mode: str = "full",
+    skip_existing: bool = False,
+    max_pages: Optional[int] = None,
+    opener: Optional[Any] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, int], str]:
+    """
+    Resumable stargazers ingest: checkpoints last completed page, flattens star+json
+    payloads, and atomically writes dest_json_path. Returns (records, stats, status)
+    where status is SUCCESS, SKIPPED_EXISTING, or raised on failure.
+    """
+    ckpt_path = stargazers_checkpoint_path(dest_json_path)
+    checkpoint = read_stargazers_checkpoint(ckpt_path)
+    start_page = resolve_stargazers_start_page(checkpoint, run_mode, skip_existing)
+    if start_page is None:
+        existing = load_landed_stargazers(dest_json_path)
+        return existing, {"pages": 0, "api_calls": 0, "last_page": checkpoint.get("last_completed_page") or 0}, "SKIPPED_EXISTING"
+
+    accumulated = load_landed_stargazers(dest_json_path) if start_page > 1 else []
+
+    def _on_page(page_number: int, page_records: List[Any]) -> None:
+        nonlocal accumulated
+        repo_full = f"{owner}/{repo}"
+        flat = [flatten_stargazer_item(rec, repo_full) for rec in page_records]
+        accumulated = merge_stargazer_records(accumulated, flat)
+        write_json_atomic(dest_json_path, accumulated)
+        write_stargazers_checkpoint(ckpt_path, page_number, "in_progress", len(accumulated))
+
+    records, stats = fetch_entity(
+        owner=owner,
+        repo=repo,
+        entity="stargazers",
+        run_mode=run_mode,
+        since_iso=None,
+        until_iso=None,
+        token=token,
+        opener=opener,
+        max_pages=max_pages,
+        start_page=start_page,
+        page_callback=_on_page,
+    )
+    accumulated = merge_stargazer_records(accumulated, records)
+    write_json_atomic(dest_json_path, accumulated)
+    last_page = int(stats.get("last_page") or start_page)
+    terminal = "in_progress" if int(stats.get("has_more") or 0) else "complete"
+    write_stargazers_checkpoint(ckpt_path, last_page, terminal, len(accumulated))
+    stats = dict(stats)
+    stats["records"] = len(accumulated)
+    return accumulated, stats, "SUCCESS"
+
+
+def fetch_stargazers_history(
+    owner: str,
+    repo: str,
+    token: Optional[str] = None,
+    run_mode: str = "full",
+    dest_json_path: Optional[str] = None,
+    max_pages: Optional[int] = None,
+    skip_existing: bool = False,
+    opener: Optional[Any] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any], str]:
+    """
+    Fetches weekly star history from GET /repos/{owner}/{repo}/stargazers/history.
+    - full mode: paginates all pages (following Link header) for all-time weekly history.
+    - incremental mode: fetches page 1 only (30 weeks of trailing buffer).
+    """
+    if dest_json_path and os.path.exists(dest_json_path) and skip_existing and run_mode == "full":
+        try:
+            with open(dest_json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list) and len(data) > 0:
+                return data, {"pages": 0, "api_calls": 0, "weeks": len(data)}, "SKIPPED_EXISTING"
+        except Exception:
+            pass
+
+    records, stats = fetch_entity(
+        owner=owner,
+        repo=repo,
+        entity="stars_history",
+        run_mode=run_mode,
+        since_iso=None,
+        until_iso=None,
+        token=token or "",
+        opener=opener,
+        max_pages=max_pages,
+    )
+
+    if dest_json_path:
+        write_json_atomic(dest_json_path, records)
+
+    return records, stats, "SUCCESS"

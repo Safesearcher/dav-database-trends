@@ -16,6 +16,7 @@ erDiagram
     dim_repo ||--o{ fact_releases : "repo_key"
     dim_repo ||--o{ fact_repo_snapshot : "repo_key"
     dim_repo ||--o{ fact_repo_daily_activity : "repo_key"
+    dim_repo ||--o{ fact_repo_stars_weekly : "repo_key"
 
     dim_date ||--o{ fact_commits : "date_key"
     dim_date ||--o{ fact_issues : "created_date_key"
@@ -23,6 +24,7 @@ erDiagram
     dim_date ||--o{ fact_releases : "published_date_key"
     dim_date ||--o{ fact_repo_snapshot : "snapshot_date_key"
     dim_date ||--o{ fact_repo_daily_activity : "date_key"
+    dim_date ||--o{ fact_repo_stars_weekly : "week_start_date_key"
 
     dim_actor ||--o{ fact_commits : "actor_key"
     dim_actor ||--o{ fact_issues : "actor_key"
@@ -146,6 +148,16 @@ erDiagram
         BIGINT commits_human_4wk
         BIGINT commits_human_12wk
         BOOLEAN in_analysis_window
+        TIMESTAMP load_timestamp
+    }
+
+    fact_repo_stars_weekly {
+        BIGINT repo_key FK
+        INT week_start_date_key FK
+        DATE week_start_date
+        BIGINT stars_gained
+        BIGINT cumulative_stars
+        BIGINT star_velocity_4wk
         TIMESTAMP load_timestamp
     }
 ```
@@ -341,6 +353,27 @@ erDiagram
 | `commits_human_4wk` | `BIGINT` | **No** | Rolling 28-day human commit velocity sum over dense calendar spine |
 | `commits_human_12wk` | `BIGINT` | **No** | Rolling 84-day human commit velocity sum over dense calendar spine |
 | `in_analysis_window` | `BOOLEAN` | **No** | True if date falls within `2026-04-01` to `2026-09-30` |
+| `load_timestamp` | `TIMESTAMP` | **No** | Medallion ETL processing timestamp in UTC |
+
+---
+
+### 4.2 `gold.fact_repo_stars_weekly`
+* **Grain:** `(repo_key, week_start_date_key)` — exactly one row per repository per Sunday-based week (matching GitHub `GET /repos/{owner}/{repo}/stargazers/history`).
+* **Dense Weekly Spine:** Guarantees zero-star weeks are materialized with 0 counts for correct rolling window calculations.
+* **Primary Key:** `(repo_key, week_start_date_key)`
+* **Liquid Clustering:** `CLUSTER BY (repo_key, week_start_date_key)`
+* **Reconciliation:** Cumulative stars through the snapshot date weekday are reconciled against `fact_repo_snapshot.stargazers_count` and measured deltas are audited in `gold.audit_gold_reconciliation`.
+* **BI Axis Contract:** Visuals must use `dim_date[full_date]` (the Sunday week start) as the continuous date axis, NEVER `dim_date[week_of_year]`, since ISO weeks end on Sunday.
+
+| Column Name | Data Type | Nullable | Description |
+|---|---|---|---|
+| `repo_key` | `BIGINT` | **No** | Foreign Key referencing `dim_repo.repo_key` |
+| `week_start_date_key` | `INT` | **No** | Foreign Key referencing `dim_date.date_key` (Sunday week start, format YYYYMMDD) |
+| `week_start_date` | `DATE` | **No** | Sunday week start date (`dayofweek == 1`) |
+| `stars_gained` | `BIGINT` | **No** | Stars added during the 7-day Sunday-to-Saturday window (0 if no stars) |
+| `cumulative_stars` | `BIGINT` | **No** | Running cumulative stars from inception through this week |
+| `star_velocity_4wk` | `BIGINT` | **Yes** | Rolling 4-week sum of `stars_gained` over complete weeks. Strictly `NULL` on partial weeks (`is_partial_week = TRUE`) |
+| `is_partial_week` | `BOOLEAN` | **No** | True if current UTC date is within 7 days of `week_start_date` (`current_date() < date_add(week_start_date, 7)`) |
 | `load_timestamp` | `TIMESTAMP` | **No** | Medallion ETL processing timestamp in UTC |
 
 ---

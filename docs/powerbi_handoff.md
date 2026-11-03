@@ -14,9 +14,9 @@ This document serves as the implementation contract and developer handoff guide 
 4. In the Navigator:
    * Expand Catalog: `workspace`
    * Select Schema: `gold`
-   * Select the 9 Gold star schema tables and 2 audit views:
+   * Select the 10 Gold star schema tables and 2 audit views:
      * `dim_repo`, `dim_date`, `dim_actor`
-     * `fact_commits`, `fact_issues`, `fact_pull_requests`, `fact_releases`, `fact_repo_snapshot`, `fact_repo_daily_activity`
+     * `fact_commits`, `fact_issues`, `fact_pull_requests`, `fact_releases`, `fact_repo_snapshot`, `fact_repo_daily_activity`, `fact_repo_stars_weekly`
      * `audit_pipeline_runs`, `audit_gold_reconciliation`
 5. **Connectivity Mode:**
    * **Import Mode (Recommended):** Ingests all tables into Power BI's in-memory VertiPaq engine. The dataset is compact (~35,000 total rows across all tables) and Import mode enables instantaneous slicing, complex DAX measures, and offline development.
@@ -36,6 +36,7 @@ In the **Model View**, establish the following relationships. All relationship c
 | `dim_repo` | `repo_key` | `fact_releases` | `repo_key` | 1 : Many | Active |
 | `dim_repo` | `repo_key` | `fact_repo_snapshot` | `repo_key` | 1 : Many | Active |
 | `dim_repo` | `repo_key` | `fact_repo_daily_activity` | `repo_key` | 1 : Many | Active |
+| `dim_repo` | `repo_key` | `fact_repo_stars_weekly` | `repo_key` | 1 : Many | Active |
 | `dim_date` | `date_key` | `fact_commits` | `date_key` | 1 : Many | Active |
 | `dim_date` | `date_key` | `fact_issues` | `created_date_key` | 1 : Many | Active |
 | `dim_date` | `date_key` | `fact_issues` | `closed_date_key` | 1 : Many | Inactive |
@@ -44,6 +45,7 @@ In the **Model View**, establish the following relationships. All relationship c
 | `dim_date` | `date_key` | `fact_releases` | `published_date_key` | 1 : Many | Active |
 | `dim_date` | `date_key` | `fact_repo_snapshot` | `snapshot_date_key` | 1 : Many | Active |
 | `dim_date` | `date_key` | `fact_repo_daily_activity` | `date_key` | 1 : Many | Active |
+| `dim_date` | `date_key` | `fact_repo_stars_weekly` | `week_start_date_key` | 1 : Many | Active |
 | `dim_actor` | `actor_key` | `fact_commits` | `actor_key` | 1 : Many | Active |
 | `dim_actor` | `actor_key` | `fact_issues` | `actor_key` | 1 : Many | Active |
 | `dim_actor` | `actor_key` | `fact_pull_requests` | `actor_key` | 1 : Many | Active |
@@ -100,11 +102,27 @@ Avg Days Between Releases =
 AVERAGE(fact_releases[days_since_previous_release])
 
 // 7. Active Human Contributors (Distinct Count)
-Active Contributors = 
+Active Contributors =
 CALCULATE(
     DISTINCTCOUNT(fact_commits[actor_key]),
     fact_commits[is_bot] = FALSE()
 )
+
+// 8. Stars Gained (Weekly)
+Stars Gained = SUM(fact_repo_stars_weekly[stars_gained])
+
+// 9. Cumulative Stars (Latest)
+Cumulative Stars =
+VAR LatestWeek =
+    MAX(fact_repo_stars_weekly[week_start_date])
+RETURN
+    CALCULATE(
+        SUM(fact_repo_stars_weekly[cumulative_stars]),
+        fact_repo_stars_weekly[week_start_date] = LatestWeek
+    )
+
+// 10. Star Velocity 4-Week
+Star Velocity 4wk = SUM(fact_repo_stars_weekly[star_velocity_4wk])
 ```
 
 ---
@@ -128,3 +146,20 @@ When configuring dashboard visuals and report filters, keep these empirical char
 5. **Vector vs. Established Database Categories:**
    * `dim_repo[db_category]` divides the 10 repos into `'Established'` (Postgres, Redis, Cassandra, MongoDB, CockroachDB) and `'Emerging'` (SurrealDB, Qdrant, Milvus, Chroma, FAISS).
    * Use this column as a visual category filter on scatter plots and comparative bar charts.
+
+---
+
+## 6. Star History Visual Guidelines & Date Axis Contract
+
+### 6.1 Date Axis Contract (`dim_date[full_date]`)
+* **MANDATORY RULE:** Visuals depicting weekly star trends (`Stars Gained`, `Cumulative Stars`, `Star Velocity 4wk`) **must use `dim_date[full_date]` (the Sunday week start) as the continuous date axis**, and **NEVER `dim_date[week_of_year]`**.
+* **Reasoning:** GitHub's `GET /repos/{owner}/{repo}/stargazers/history` endpoint defines weekly buckets starting Sunday 00:00:00 UTC. In contrast, ISO-8601 calendar weeks begin on Monday and end on Sunday. Using `week_of_year` causes split-week boundary distortions and misaligns week totals with the date dimension.
+
+### 6.2 Partial Week Handling (`is_partial_week`)
+* The incomplete ongoing calendar week is identified dynamically where `current_date() < date_add(week_start_date, 7)` and marked with `is_partial_week = TRUE`.
+* **Velocity Policy:** `star_velocity_4wk` is strictly set to `NULL` on partial weeks in `fact_repo_stars_weekly`.
+* **Visual Filter:** In Power BI, filter line visuals for `Star Velocity 4wk` with `is_partial_week = FALSE` (or format incomplete weeks with a separate dashed series) to avoid displaying false drop-offs before the week closes.
+
+### 6.3 Honest Visual Labelling (Charts A & B)
+* Charts A and B must remain strictly labelled **"Human Commits"** on all dashboard axis titles, cards, and tooltips until `fact_repo_stars_weekly` has been populated by a live cluster run.
+* Never imply star popularity or star velocity on visuals backed by commit data. Once `fact_repo_stars_weekly` is refreshed from live data, introduce dedicated star charts referencing the verified Gold measures.
