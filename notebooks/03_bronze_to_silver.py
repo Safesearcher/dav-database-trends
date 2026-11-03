@@ -333,7 +333,7 @@ def transform_stars_weekly(bronze_df, repo_full_name):
         F.col("_corrupt_record"),
         week_start_expr.alias("week_start_date"),
         F.to_timestamp(week_start_expr).alias("week_timestamp_utc"),
-        F.coalesce(F.col("total"), F.lit(0)).cast(LongType()).alias("stars_gained"),
+        F.coalesce(F.col("total"), F.lit(0)).cast(IntegerType()).alias("stars_gained"),
         F.current_timestamp().alias("load_timestamp")
     )
 

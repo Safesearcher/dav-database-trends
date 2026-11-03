@@ -78,7 +78,7 @@ until_iso = normalise_since(until_raw) if until_raw else None
 target_repos = resolve_repo(repo_widget)
 
 # Resolve target entities
-ALL_ENTITIES = ["repo_metadata", "commits", "issues", "pulls", "releases", "stars_history"]
+ALL_ENTITIES = ["repo_metadata", "commits", "issues", "pulls", "releases", "stars_history", "stargazers"]
 if entity_widget.upper() == "ALL":
     target_entities = list(ALL_ENTITIES)
 elif entity_widget in ALL_ENTITIES:
@@ -259,7 +259,6 @@ for owner, repo in target_repos:
                     write_json_atomic(target_file, records)
 
                     rec_count = 1 if entity == "repo_metadata" and isinstance(records, dict) else len(records)
-                    total_records_ingested += rec_count
 
                     run_ctx["rows_inserted"] = rec_count
                     run_ctx["rows_updated"] = 0

@@ -378,13 +378,11 @@ with log_run(spark, layer="GOLD", parameter="table=fact_repo_stars_weekly,repo=A
         df_dim_date=t_gold_date,
     )
 
-    print("
-" + "=" * 80)
+    print("\n" + "=" * 80)
     print("EXPLAIN FORMATTED: gold.fact_repo_stars_weekly")
     print("=" * 80)
     df_fact_stars_weekly.explain(mode="formatted")
-    print("=" * 80 + "
-")
+    print("=" * 80 + "\n")
 
     ins_stars, upd_stars = merge_delta(
         spark,
@@ -405,8 +403,7 @@ with log_run(spark, layer="GOLD", parameter="table=fact_repo_stars_weekly,repo=A
 
 # COMMAND ----------
 
-print("
-" + "=" * 80)
+print("\n" + "=" * 80)
 print("EXECUTING STAR HISTORY RECONCILIATION AT SNAPSHOT DATE")
 print("=" * 80)
 
@@ -507,18 +504,18 @@ recon_rows = []
 for row in df_reconciled.collect():
     recon_rows.append((
         "fact_repo_stars_weekly",
-        int(row["reconciled_stars_at_snapshot"]),
-        int(row["stargazers_count"]),
-        int(row["delta"]),
+        int(row["reconciled_stars_at_snapshot"]) if row["reconciled_stars_at_snapshot"] is not None else 0,
+        int(row["stargazers_count"]) if row["stargazers_count"] is not None else 0,
+        int(row["delta"]) if row["delta"] is not None else 0,
         row["status"],
         datetime.now(timezone.utc),
     ))
 
 recon_schema = StructType([
     StructField("table_name", StringType(), False),
-    StructField("weekly_cumulative", LongType(), True),
-    StructField("snapshot_count", LongType(), True),
-    StructField("delta", LongType(), True),
+    StructField("silver_source_rows", LongType(), True),
+    StructField("gold_target_rows", LongType(), True),
+    StructField("delta_rows", LongType(), True),
     StructField("status", StringType(), False),
     StructField("check_timestamp", TimestampType(), False),
 ])

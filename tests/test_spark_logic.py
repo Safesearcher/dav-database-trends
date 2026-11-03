@@ -1,3 +1,11 @@
+import os
+import sys
+
+# Ensure Spark workers use virtualenv Python on Windows
+if "PYSPARK_PYTHON" not in os.environ:
+    os.environ["PYSPARK_PYTHON"] = sys.executable
+if "PYSPARK_DRIVER_PYTHON" not in os.environ:
+    os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 """
 Acceptance checks for Spark and pipeline logic (Section 5.1).
 Covers:

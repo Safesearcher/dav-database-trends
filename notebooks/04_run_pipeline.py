@@ -108,8 +108,8 @@ def show_counts(label=""):
     print(f"ROW COUNTS  {label}")
     print(f"{'='*75}")
     layers = [
-        (f"{CATALOG}.bronze", ["commits", "issues", "pull_requests", "releases", "repo_metadata"]),
-        (f"{CATALOG}.silver", ["commits", "issues", "pull_requests", "releases", "repo_metadata"]),
+        (f"{CATALOG}.bronze", ["commits", "issues", "pull_requests", "releases", "repo_metadata", "stars_history"]),
+        (f"{CATALOG}.silver", ["commits", "issues", "pull_requests", "releases", "repo_metadata", "stars_weekly"]),
         (f"{CATALOG}.gold",   [
             "dim_repo", "dim_date", "dim_actor",
             "fact_commits", "fact_issues", "fact_pull_requests",
@@ -529,8 +529,8 @@ def _pipeline_state():
     """Collect current row counts and metric sums from Bronze, Silver, Ops, and Gold."""
     state = {}
     layers = [
-        (f"{CATALOG}.bronze", ["commits", "issues", "pull_requests", "releases", "repo_metadata"]),
-        (f"{CATALOG}.silver", ["commits", "issues", "pull_requests", "releases", "repo_metadata"]),
+        (f"{CATALOG}.bronze", ["commits", "issues", "pull_requests", "releases", "repo_metadata", "stars_history"]),
+        (f"{CATALOG}.silver", ["commits", "issues", "pull_requests", "releases", "repo_metadata", "stars_weekly"]),
         (f"{CATALOG}.gold",   [
             "dim_repo", "dim_date", "dim_actor",
             "fact_commits", "fact_issues", "fact_pull_requests",

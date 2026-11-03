@@ -1,3 +1,11 @@
+import os
+import sys
+
+# Ensure Spark workers use virtualenv Python on Windows
+if "PYSPARK_PYTHON" not in os.environ:
+    os.environ["PYSPARK_PYTHON"] = sys.executable
+if "PYSPARK_DRIVER_PYTHON" not in os.environ:
+    os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 """
 Unit and integration tests for Gold Star Schema transformations (src/gold_transforms.py).
 
@@ -529,6 +537,87 @@ class TestGoldTransforms(unittest.TestCase):
                 df_dim_date=df_dim_date,
             )
         self.assertIn("not a Sunday", str(ctx.exception))
+
+
+    @unittest.skipUnless(HAS_SPARK, "PySpark not available")
+    def test_fact_repo_stars_weekly_dense_spine_zero_fill(self):
+        """Test verifies that missing weeks in silver source are zero-filled by the dense spine:
+        If a repo has activity on week 1 (Oct 4) and week 3 (Oct 18), week 2 (Oct 11) is created with stars_gained = 0."""
+        from src.schemas import GOLD_DIM_REPO_SCHEMA, SILVER_STARS_WEEKLY_SCHEMA
+        now = datetime.now(timezone.utc)
+        test_key = 123456789
+
+        repo_data = [(test_key, 1, "redis/redis", "redis", "redis", "desc", "main", "BSD", now, "NoSQL", "Key-Value", now)]
+        df_dim_repo = spark.createDataFrame(repo_data, schema=GOLD_DIM_REPO_SCHEMA)
+        df_dim_date = build_dim_date(spark, start_date_str="2026-10-01", end_date_str="2026-10-31")
+
+        # Provide ONLY Oct 4 and Oct 18 (Oct 11 missing)
+        silver_data = [
+            ("redis/redis", date(2026, 10, 4), datetime(2026, 10, 4, 0, 0, tzinfo=timezone.utc), 15, [2, 2, 2, 2, 2, 3, 2], "src.json", now),
+            ("redis/redis", date(2026, 10, 18), datetime(2026, 10, 18, 0, 0, tzinfo=timezone.utc), 25, [3, 4, 3, 4, 3, 4, 4], "src.json", now),
+        ]
+        df_silver = spark.createDataFrame(silver_data, schema=SILVER_STARS_WEEKLY_SCHEMA)
+
+        df_fact_stars = build_fact_repo_stars_weekly(
+            df_silver_stars_weekly=df_silver,
+            df_dim_repo=df_dim_repo,
+            df_dim_date=df_dim_date,
+            current_date_val="2026-10-25",
+        )
+
+        rows = {r["week_start_date"]: r for r in df_fact_stars.collect()}
+        # Week 2 (2026-10-11) MUST exist in the dense spine
+        self.assertIn(date(2026, 10, 11), rows)
+        row_oct11 = rows[date(2026, 10, 11)]
+        self.assertEqual(row_oct11["stars_gained"], 0)
+        self.assertEqual(row_oct11["cumulative_stars"], 15)
+
+        # Week 3 (2026-10-18) cumulative stars is 15 + 0 + 25 = 40
+        row_oct18 = rows[date(2026, 10, 18)]
+        self.assertEqual(row_oct18["stars_gained"], 25)
+        self.assertEqual(row_oct18["cumulative_stars"], 40)
+
+    @unittest.skipUnless(HAS_SPARK, "PySpark not available")
+    def test_fact_repo_stars_weekly_multi_repo_isolation(self):
+        """Test verifies that running cumulative totals and 4-week velocities are strictly isolated per repo."""
+        from src.schemas import GOLD_DIM_REPO_SCHEMA, SILVER_STARS_WEEKLY_SCHEMA
+        now = datetime.now(timezone.utc)
+        key_redis = 101
+        key_pg = 102
+
+        repo_data = [
+            (key_redis, 1, "redis/redis", "redis", "redis", "desc", "main", "BSD", now, "NoSQL", "Key-Value", now),
+            (key_pg, 2, "postgres/postgres", "postgres", "postgres", "desc", "master", "PostgreSQL", now, "SQL", "Relational", now),
+        ]
+        df_dim_repo = spark.createDataFrame(repo_data, schema=GOLD_DIM_REPO_SCHEMA)
+        df_dim_date = build_dim_date(spark, start_date_str="2026-10-01", end_date_str="2026-10-31")
+
+        silver_data = [
+            ("redis/redis", date(2026, 10, 4), datetime(2026, 10, 4, tzinfo=timezone.utc), 10, [1]*7, "f1", now),
+            ("redis/redis", date(2026, 10, 11), datetime(2026, 10, 11, tzinfo=timezone.utc), 10, [1]*7, "f1", now),
+            ("postgres/postgres", date(2026, 10, 4), datetime(2026, 10, 4, tzinfo=timezone.utc), 50, [7]*7, "f2", now),
+            ("postgres/postgres", date(2026, 10, 11), datetime(2026, 10, 11, tzinfo=timezone.utc), 50, [7]*7, "f2", now),
+        ]
+        df_silver = spark.createDataFrame(silver_data, schema=SILVER_STARS_WEEKLY_SCHEMA)
+
+        df_fact_stars = build_fact_repo_stars_weekly(
+            df_silver_stars_weekly=df_silver,
+            df_dim_repo=df_dim_repo,
+            df_dim_date=df_dim_date,
+            current_date_val="2026-10-25",
+        )
+
+        all_rows = df_fact_stars.collect()
+        redis_rows = {r["week_start_date"]: r for r in all_rows if r["repo_key"] == key_redis}
+        pg_rows = {r["week_start_date"]: r for r in all_rows if r["repo_key"] == key_pg}
+
+        # Redis cumulative must be 10 on Oct 4, 20 on Oct 11
+        self.assertEqual(redis_rows[date(2026, 10, 4)]["cumulative_stars"], 10)
+        self.assertEqual(redis_rows[date(2026, 10, 11)]["cumulative_stars"], 20)
+
+        # Postgres cumulative must be 50 on Oct 4, 100 on Oct 11 (independent of Redis)
+        self.assertEqual(pg_rows[date(2026, 10, 4)]["cumulative_stars"], 50)
+        self.assertEqual(pg_rows[date(2026, 10, 11)]["cumulative_stars"], 100)
 
 
 if __name__ == "__main__":

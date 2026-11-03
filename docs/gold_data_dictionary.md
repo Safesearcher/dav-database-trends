@@ -158,6 +158,7 @@ erDiagram
         BIGINT stars_gained
         BIGINT cumulative_stars
         BIGINT star_velocity_4wk
+        BOOLEAN is_partial_week
         TIMESTAMP load_timestamp
     }
 ```

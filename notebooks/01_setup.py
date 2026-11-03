@@ -286,6 +286,7 @@ with log_run(spark, layer="SETUP", parameter=f"catalog={catalog}", batch_id=batc
         "pulls": "pull_requests",
         "releases": "releases",
         "repo_metadata": "repo_metadata",
+        "stars_history": "stars_history",
         "stargazers": "stargazers",
     }
     LINEAGE = [
