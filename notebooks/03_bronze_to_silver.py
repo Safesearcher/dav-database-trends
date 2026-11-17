@@ -364,6 +364,7 @@ def transform_stars_weekly(bronze_df, repo_full_name):
     )
 
     return valid_df, rejected_df, ["repo_full_name", "week_start_date"]
+
 # COMMAND ----------
 
 # MAGIC %md

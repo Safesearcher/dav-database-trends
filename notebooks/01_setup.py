@@ -296,7 +296,9 @@ with log_run(spark, layer="SETUP", parameter=f"catalog={catalog}", batch_id=batc
         StructField("load_timestamp", TimestampType(), True),
     ]
     for entity, schema in BRONZE_SCHEMAS.items():
-        fields = [f for f in schema.fields if f.name != "_corrupt_record"] + LINEAGE
+        base = [f for f in schema.fields if f.name != "_corrupt_record"]
+        existing = {f.name for f in base}
+        fields = base + [f for f in LINEAGE if f.name not in existing]
         (spark.createDataFrame([], StructType(fields)).write.format("delta").mode("ignore")
              .saveAsTable(f"{catalog}.{bronze_schema}.{TABLE_NAME_MAP[entity]}"))
     print(f"Verified all 6 Bronze tables in {catalog}.{bronze_schema}")
