@@ -34,5 +34,5 @@ This directory holds the artifacts proving end-to-end execution of the PySpark M
   - `01_setup.html` / `01_setup.ipynb`
   - `02_raw_to_bronze.html` / `02_raw_to_bronze.ipynb`
   - `03_bronze_to_silver.html` / `03_bronze_to_silver.ipynb`
-  - `04_run_pipeline.html` / `04_run_pipeline.ipynb`
-  - `05_silver_to_gold.html` / `05_silver_to_gold.ipynb`
+  - `04_run_pipeline_v2.ipynb` — executed pipeline run, including the A-2 source pre-flight
+  - `05_silver_to_gold.ipynb` — executed Silver-to-Gold run and quality gates
