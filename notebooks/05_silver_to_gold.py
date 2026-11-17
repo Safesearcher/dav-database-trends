@@ -621,14 +621,33 @@ check_ts = datetime.now(timezone.utc)
 
 for gold_tbl, silver_tbl in reconciliation_pairs:
     silver_cnt = spark.table(f"{catalog}.{silver_schema}.{silver_tbl}").count()
-    gold_cnt = spark.table(f"{catalog}.{gold_schema}.{gold_tbl}").count()
+    gold_df = spark.table(f"{catalog}.{gold_schema}.{gold_tbl}")
+    if gold_tbl == "fact_repo_snapshot":
+        # Snapshot Gold retains one point-in-time row per repo per run, while
+        # Silver metadata contains only the current source rows.
+        latest_snapshot_key = (
+            gold_df
+            .agg(F.max("snapshot_date_key").alias("latest_snapshot_date_key"))
+            .first()["latest_snapshot_date_key"]
+        )
+        gold_cnt = (
+            gold_df
+            .filter(F.col("snapshot_date_key") == latest_snapshot_key)
+            .count()
+            if latest_snapshot_key is not None
+            else 0
+        )
+        comparison_label = f"{gold_tbl} (latest snapshot {latest_snapshot_key})"
+    else:
+        gold_cnt = gold_df.count()
+        comparison_label = gold_tbl
     delta = gold_cnt - silver_cnt
     is_pass = (delta == 0)
     if not is_pass:
         all_reconciled = False
     status = "PASS" if is_pass else "FAIL"
     reconciliation_rows.append((gold_tbl, silver_cnt, gold_cnt, delta, status, check_ts))
-    print(f"  ✓ [Reconciliation] {silver_schema}.{silver_tbl:<15} ({silver_cnt:,}) == {gold_schema}.{gold_tbl:<20} ({gold_cnt:,})  Delta: {delta} [{status}]")
+    print(f"  ✓ [Reconciliation] {silver_schema}.{silver_tbl:<15} ({silver_cnt:,}) == {gold_schema}.{comparison_label:<42} ({gold_cnt:,})  Delta: {delta} [{status}]")
 
 # Write audit log to gold.audit_gold_reconciliation
 recon_schema = StructType([
