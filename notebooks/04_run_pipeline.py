@@ -163,6 +163,7 @@ if workspace_root not in sys.path:
     sys.path.append(workspace_root)
 
 from src.common import get_salt
+from src.pipeline_preflight import ensure_source_layout
 
 try:
     _configured_salt = get_salt(dbutils)
@@ -170,15 +171,21 @@ try:
 except Exception as _salt_err:
     raise ValueError(f"Pre-flight failed: {_salt_err}")
 
-# COMMAND ----------
 
-# ── Optional Pre-Ingestion Hook ─────────────────────────────────────────────
-# When widget run_ingestion is "true", runs ./00_ingest_github_api in incremental mode
-# and points Section A's Bronze run to the landed batch path.
-if dbutils.widgets.get("run_ingestion").strip().lower() in ("true", "1", "yes"):
-    _landing_root = "/Volumes/workspace/bronze_data/incremental"
-    _ingest_batch = f"{BATCH_ID}_incr"
-    print(f"[Ingestion Hook] Running ./00_ingest_github_api in incremental mode for batch {_ingest_batch}...")
+def _source_file_exists(path):
+    """Check a Volume file without hiding failures from the pipeline itself."""
+    try:
+        stats = dbutils.fs.ls(path)
+        return bool(stats and stats[0].size > 2)
+    except Exception:
+        return False
+
+
+def _run_incremental_ingestion():
+    """Land a complete incremental source batch and return its root path."""
+    landing_root = "/Volumes/workspace/bronze_data/incremental"
+    ingest_batch = f"{BATCH_ID}_incr"
+    print(f"[Ingestion Hook] Running ./00_ingest_github_api in incremental mode for batch {ingest_batch}...")
     run_nb("./00_ingest_github_api", {
         "catalog":      CATALOG,
         "repo":         "ALL",
@@ -186,10 +193,19 @@ if dbutils.widgets.get("run_ingestion").strip().lower() in ("true", "1", "yes"):
         "run_mode":     "incremental",
         "since":        INCR_SINCE,
         "until":        INCR_UNTIL,
-        "batch_id":     _ingest_batch,
-        "landing_root": _landing_root,
+        "batch_id":     ingest_batch,
+        "landing_root": landing_root,
     })
-    BASE_PATH = f"{_landing_root}/{_ingest_batch}"
+    return f"{landing_root}/{ingest_batch}"
+
+
+# COMMAND ----------
+
+# ── Optional Pre-Ingestion Hook ─────────────────────────────────────────────
+# When widget run_ingestion is "true", runs ./00_ingest_github_api in incremental mode
+# and points Section A's Bronze run to the landed batch path.
+if dbutils.widgets.get("run_ingestion").strip().lower() in ("true", "1", "yes"):
+    BASE_PATH = _run_incremental_ingestion()
     print(f"[Ingestion Hook] Pointing Section A Bronze run to base_path: {BASE_PATH}")
 
 # COMMAND ----------
@@ -220,6 +236,14 @@ print(f"  batch_id  : {A_BATCH_ID}")
 # COMMAND ----------
 
 # ── A-2 : Bronze pass — all repos × all entities ─────────────────────────────
+BASE_PATH = ensure_source_layout(
+    BASE_PATH,
+    ALL_REPOS,
+    ALL_ENTITIES,
+    _source_file_exists,
+    _run_incremental_ingestion,
+)
+print(f"[A-2 pre-flight] Source layout validated: {BASE_PATH}")
 print(f"\n[A-2] Bronze — all repos")
 for repo in ALL_REPOS:
     for entity in ALL_ENTITIES:

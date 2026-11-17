@@ -70,13 +70,13 @@ Databricks Serverless with Unity Catalog and Delta Lake.
 
 ```mermaid
 flowchart TD
-    GH["GitHub REST API\n(10 repos × 5 entities)"]
+    GH["GitHub REST API\n(10 repos × 6 entities)"]
     FI["scripts/fetch_incremental.py\nLocal fetch → samples/incremental/"]
     VOL["Unity Catalog Volume\n/Volumes/workspace/bronze_data/raw/"]
     B02["02_raw_to_bronze.py\nPERMISSIVE read · explicit schema\nMERGE INTO bronze.*"]
     B03["03_bronze_to_silver.py\nPII hash · is_bot · type cast\nMERGE INTO silver.*"]
     B05["05_silver_to_gold.py\nStar Schema · Dense Spine\nMERGE INTO gold.*"]
-    BRONZE["bronze.*\nDelta tables\n(5 entities × 10 repos)"]
+    BRONZE["bronze.*\nDelta tables\n(6 entities × 10 repos)"]
     SILVER["silver.*\nDelta tables\n(5 typed entities)"]
     GOLD["gold.*\nStar Schema Tables\n(3 Dims · 5 Base Facts · 1 Agg Fact)"]
     QUAR["ops.silver_quarantine\nBad records"]
@@ -722,7 +722,7 @@ The pipeline is orchestrated from [`notebooks/04_run_pipeline.py`](notebooks/04_
 
 ### 9.1 Incremental Load (Section A)
 
-**Purpose:** Executes standard nightly or periodic processing for all 10 tracked repositories and all 5 entities (`commits`, `issues`, `pulls`, `releases`, `repo_metadata`), ingesting delta changes and promoting them to Silver.
+**Purpose:** Executes standard nightly or periodic processing for all 10 tracked repositories and all 6 entities (`commits`, `issues`, `pulls`, `releases`, `repo_metadata`, `stars_history`), ingesting delta changes and promoting them to Silver.
 
 **Widgets to Configure in `04_run_pipeline.py`:**
 
@@ -737,7 +737,8 @@ The pipeline is orchestrated from [`notebooks/04_run_pipeline.py`](notebooks/04_
 
 **Execution Order & Operations:**
 1. *(Optional Pre-Ingestion Hook)*: If `run_ingestion="true"`, runs `00_ingest_github_api` for all repos/entities with `run_mode="incremental"` and `since=incr_since`, landing fresh API extracts on the Volume.
-2. **Bronze Pass (A-2):** Iterates through all 10 repositories (`ALL_REPOS`) and all 5 entities (`ALL_ENTITIES`), invoking `02_raw_to_bronze.py`.
+2. **A-2 Source Pre-flight:** Validates the configured source layout. A malformed `raw/raw_api` path fails with an actionable error. If any `stars_history.json` files are missing, the orchestrator runs `00_ingest_github_api` incrementally and redirects Section A to that batch; otherwise existing staged files are reused.
+3. **Bronze Pass (A-2):** Iterates through all 10 repositories (`ALL_REPOS`) and all 6 entities (`ALL_ENTITIES`), invoking `02_raw_to_bronze.py`.
    - Reads raw JSON with explicit schemas in `PERMISSIVE` mode.
    - Detects schema drift and dynamically evolves Bronze Delta tables via `mergeSchema`.
    - Routes corrupt records and null primary keys to `ops.silver_quarantine` with `layer='bronze'`.
@@ -770,7 +771,7 @@ The pipeline is orchestrated from [`notebooks/04_run_pipeline.py`](notebooks/04_
 
 **Execution & Safety Guarantees:**
 - **Zero Code Changes:** No notebook code or SQL queries need editing. Setting the three backfill widgets controls the entire execution window.
-- **Bronze Backfill Pass (B-2):** Runs `02_raw_to_bronze.py` for the designated repository across all 5 entities with `run_mode="backfill"`.
+- **Bronze Backfill Pass (B-2):** Runs `02_raw_to_bronze.py` for the designated repository across all 6 entities with `run_mode="backfill"`.
 - **Silver Backfill Pass (B-3):** Runs `03_bronze_to_silver.py` for the designated repository with `run_mode="backfill"`.
 - **Safe Re-runs via Delta MERGE:** Because all table writes use `MERGE INTO` keyed on `(repo_full_name, <primary_key>)`, running a backfill multiple times or overlapping with existing data will never duplicate records. Existing rows are safely updated and new historical rows are inserted.
 - **Verification (B-4):** Displays updated row counts and logs to `ops.pipeline_execution_logs` with parameter recording `mode=backfill`.
@@ -783,7 +784,7 @@ The pipeline is orchestrated from [`notebooks/04_run_pipeline.py`](notebooks/04_
 
 **Procedure in `04_run_pipeline.py` (Section D):**
 1. **D-1 Configuration:** Targets repository `redis/redis` with window `INCR_SINCE` to `INCR_UNTIL` and a fixed batch identifier `f"{BATCH_ID}_idempotency_proof"`.
-2. **D-2 First Pass:** Executes `02_raw_to_bronze.py` (all 5 entities) and `03_bronze_to_silver.py`. Captures row counts from all 5 Bronze tables, all 5 Silver tables, and `ops.silver_quarantine`.
+2. **D-2 First Pass:** Executes `02_raw_to_bronze.py` (all 6 entities) and `03_bronze_to_silver.py`. Captures row counts from all 6 Bronze tables, all 6 Silver tables, and `ops.silver_quarantine`.
 3. **D-3 Second Pass:** Immediately re-executes `02_raw_to_bronze.py` and `03_bronze_to_silver.py` with the exact same parameters, batch ID, and input data. Captures row counts after the second pass.
 4. **D-4 Idempotency Assertion:** Compares table-by-table row counts between the first and second pass:
    ```python
