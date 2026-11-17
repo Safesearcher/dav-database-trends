@@ -66,6 +66,17 @@ class TestPipelinePreflight(unittest.TestCase):
             "/Volumes/workspace/bronze_data/raw",
         )
 
+    def test_present_empty_json_file_is_not_missing(self):
+        self.assertEqual(
+            find_missing_source_files(
+                "/Volumes/workspace/bronze_data/raw",
+                ["postgres/postgres"],
+                ["issues"],
+                lambda _path: True,
+            ),
+            [],
+        )
+
     def test_missing_stars_history_refreshes_and_redirects_to_new_batch(self):
         repos = ["postgres/postgres"]
         entities = ["repo_metadata", "stars_history"]

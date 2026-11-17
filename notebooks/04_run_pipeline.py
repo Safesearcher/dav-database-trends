@@ -173,10 +173,10 @@ except Exception as _salt_err:
 
 
 def _source_file_exists(path):
-    """Check a Volume file without hiding failures from the pipeline itself."""
+    """Check that a Volume file exists; empty JSON arrays are valid no-data inputs."""
     try:
         stats = dbutils.fs.ls(path)
-        return bool(stats and stats[0].size > 2)
+        return bool(stats)
     except Exception:
         return False
 

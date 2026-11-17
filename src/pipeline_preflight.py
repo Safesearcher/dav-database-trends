@@ -43,7 +43,7 @@ def find_missing_source_files(
     entities: Iterable[str],
     file_exists: Callable[[str], bool],
 ) -> list[str]:
-    """Return required source files that are absent or empty."""
+    """Return required source files that are absent."""
     return [
         path
         for path in expected_source_files(base_path, repos, entities)
@@ -69,7 +69,7 @@ def ensure_source_layout(
         preview = "\n".join(f"  - {path}" for path in missing[:10])
         more = f"\n  ... and {len(missing) - 10} more" if len(missing) > 10 else ""
         raise FileNotFoundError(
-            "A-2 pre-flight failed: required staged source files are missing or empty:\n"
+            "A-2 pre-flight failed: required staged source files are missing:\n"
             f"{preview}{more}\n"
             "Stage all repository/entity JSON files, or verify that "
             "00_ingest_github_api can complete in incremental mode."
